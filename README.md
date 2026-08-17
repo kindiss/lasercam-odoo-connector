@@ -16,7 +16,7 @@ Adds two actions to any Bill of Materials:
 - **Import from LaserCAM** — upload the file LaserCAM produces; the module updates the
   component quantity (kg incl. cutting waste), parts-per-sheet and the sheet cutting
   time **in place**. When the BOM has no laser work center yet, it creates one
-  (`Lazeris <code>`) plus its routing operation, inheriting the cost/hour of your
+  (`Laser <code>`) plus its routing operation, inheriting the cost/hour of your
   previous work center. No duplicates, no manual field mapping.
 
 ## Supported Odoo versions

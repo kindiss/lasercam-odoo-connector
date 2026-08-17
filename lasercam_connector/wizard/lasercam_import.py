@@ -193,7 +193,7 @@ class LaserCAMImportWizard(models.TransientModel):
         BOM = self.env['mrp.bom']
         # v9-13: there is `mrp.routing` + `bom.routing_id`. v14+: routing is merged into
         # the BOM, operations are directly on `bom.operation_ids` (no `mrp.routing`).
-        # Behavior is IDENTICAL: create a "Lazeris <code>" WC and attach ONLY it
+        # Behavior is IDENTICAL: create a "Laser <code>" WC and attach ONLY it
         # (remove the old shared WC).
         has_routing = 'routing_id' in BOM._fields
         ROUTING = self.env['mrp.routing'] if has_routing else None
@@ -204,7 +204,7 @@ class LaserCAMImportWizard(models.TransientModel):
                 return _r[i].strip() if 0 <= i < len(_r) else u''
 
             code = get('code')
-            wc_name = get('wc_name') or (u'Lazeris %s' % code if code else u'Lazeris')
+            wc_name = get('wc_name') or (u'Laser %s' % code if code else u'Laser')
 
             bom = self._find_bom(get('bom'), get('bom_db_id'))
             if not bom:
@@ -222,7 +222,7 @@ class LaserCAMImportWizard(models.TransientModel):
             elif 'operation_ids' in bom._fields and bom.operation_ids:
                 old_wc = bom.operation_ids[0].workcenter_id
 
-            # 1) find-or-create WC "Lazeris <code>"; cost inherited from the old one
+            # 1) find-or-create WC "Laser <code>"; cost inherited from the old one
             wc = WC.search([('name', '=', wc_name)], limit=1)
             wc_vals = self._wc_vals(WC, get, wc_name, code, old_wc)
             if wc:
@@ -244,8 +244,8 @@ class LaserCAMImportWizard(models.TransientModel):
 
             if has_routing:
                 # v9-13: routing + operation + bom.routing_id. Reuse only if the routing
-                # is already "Lazeris <code>" (clear out foreign ops); otherwise — NEW.
-                routing_name = (u'Lazeris %s' % code) if code else (bom.display_name or u'LaserCAM')
+                # is already "Laser <code>" (clear out foreign ops); otherwise — NEW.
+                routing_name = (u'Laser %s' % code) if code else (bom.display_name or u'LaserCAM')
                 routing = None
                 if old_routing and (old_routing.name or u'').strip() == routing_name.strip() \
                         and 'workcenter_lines' in old_routing._fields:
