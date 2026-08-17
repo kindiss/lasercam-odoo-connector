@@ -1,0 +1,204 @@
+# -*- coding: utf-8 -*-
+"""Export to LaserCAM: /lasercam/export?ids=1,2,3 → ZIP with TWO CSV files
+(`mrp.bom.csv` + `mrp.workcenter.csv`).
+
+Symmetric round-trip: LaserCAM returns the same two files (with modified
+values) for import — BOM and Work centers are two separate Odoo models,
+so both export and import naturally use two files.
+
+Shared core for all Odoo versions (9–19): models/fields are detected at
+runtime, time is ALWAYS normalized to hours (the LaserCAM format is
+stable). Py2/Py3 and openerp/odoo namespace compatibility via try/except.
+"""
+import base64
+import io
+import re
+import zipfile
+
+try:
+    from odoo import http
+    from odoo.http import request
+except ImportError:  # Odoo 9 / py2
+    from openerp import http
+    from openerp.http import request
+
+# Headers — the LaserCAM parser recognizes them (EN) and returns the technical
+# field names (id, bom_line_ids/.id, product_qty, capacity_per_cycle, time_cycle).
+BOM_HEADER = [
+    'External ID',
+    'BoM Lines/ID',
+    'BoM Lines/Product Quantity',
+    'BoM Lines/Display Name',
+    'Routing/Work Centers/Name',
+]
+WC_HEADER = [
+    'External ID',
+    'Name',
+    'Capacity per Cycle',
+    'Time for 1 cycle (hour)',
+]
+
+
+def _q(cell):
+    s = u'%s' % (cell if cell is not None else u'')
+    if any(ch in s for ch in (u'"', u',', u'\n', u'\r')):
+        return u'"%s"' % s.replace(u'"', u'""')
+    return s
+
+
+def _csv(rows):
+    return u'\r\n'.join(u','.join(_q(c) for c in row) for row in rows) + u'\r\n'
+
+
+def _xmlid(rec):
+    """Existing or newly created __export__ external ID (as in Odoo export)."""
+    if not rec:
+        return u''
+    return rec.export_data(['id'])['datas'][0][0]
+
+
+def _product_dxf(env, bom):
+    """Newest .dxf attachment for the BOM product → (file_name, bytes) or None.
+    We look on both product.template and product.product (v9–19). The DXF app
+    picks it up straight from the export ZIP — no manual upload needed."""
+    Att = env['ir.attachment']
+    tmpl = bom.product_tmpl_id if 'product_tmpl_id' in bom._fields else None
+    prod = bom.product_id if 'product_id' in bom._fields else None
+    domain = ['|',
+              '&', ('res_model', '=', 'product.template'), ('res_id', '=', tmpl.id if tmpl else 0),
+              '&', ('res_model', '=', 'product.product'), ('res_id', '=', prod.id if prod else 0)]
+    has_fname = 'datas_fname' in Att._fields  # v9–12; removed in v13+
+    code = u''
+    for p in (prod, tmpl):
+        if p and getattr(p, 'default_code', None):
+            code = p.default_code
+            break
+    for att in Att.search(domain, order='id desc'):
+        fname = (att.datas_fname if has_fname else None) or att.name or u''
+        if not fname.lower().endswith('.dxf'):
+            continue
+        raw = att.datas
+        if not raw:
+            continue
+        # Ensure the code is in the file name — the app links DXF↔BOM by code.
+        # We prefix ONLY with the short code (last run of ≥3 digits, like the app's
+        # codeFrom) and only if it is not already there — to avoid a doubled name.
+        runs = re.findall(r'\d{3,}', code or u'')
+        short = runs[-1] if runs else u''
+        if short and short not in fname:
+            fname = u'%s_%s' % (short, fname)
+        return (fname, base64.b64decode(raw))
+    return None
+
+
+class LaserCAMController(http.Controller):
+
+    @http.route('/lasercam/export', type='http', auth='user')
+    def lasercam_export(self, ids='', **kw):
+        env = request.env
+        bom_ids = [int(i) for i in ids.split(',') if i.strip().isdigit()]
+        boms = env['mrp.bom'].browse(bom_ids).exists()
+
+        Bom = env['mrp.bom']
+        Wc = env['mrp.workcenter']
+        has_routing = 'routing_id' in Bom._fields  # v9–13; v14+ operacijos BOM'e
+        time_on_wc = 'time_cycle' in Wc._fields     # only v9 (hours on the workcenter)
+        cap_field = None
+        for f in ('capacity_per_cycle', 'default_capacity', 'capacity'):
+            if f in Wc._fields:
+                cap_field = f
+                break
+
+        bom_rows = [BOM_HEADER]
+        wc_seen = {}    # target_xid -> [name, cap, time_h]
+        wc_order = []   # keeps order, without duplicates
+        dxf_files = []  # [(name, bytes)] — product DXF (attachment) into the ZIP
+        dxf_names = set()
+        codes = []      # product codes → for the ZIP file name
+
+        for bom in boms:
+            bom_xid = _xmlid(bom)
+            _tmpl = bom.product_tmpl_id if 'product_tmpl_id' in bom._fields else None
+            _prod = bom.product_id if 'product_id' in bom._fields else None
+            for _p in (_prod, _tmpl):
+                if _p and getattr(_p, 'default_code', None):
+                    _runs = re.findall(r'\d{3,}', _p.default_code)
+                    if _runs and _runs[-1] not in codes:
+                        codes.append(_runs[-1])
+                    break
+            dxf = _product_dxf(env, bom)
+            if dxf:
+                name, raw = dxf
+                base, i = name, 1
+                while name in dxf_names:  # avoid duplicate names in the ZIP
+                    dot = base.rfind('.')
+                    name = (u'%s_%d%s' % (base[:dot], i, base[dot:])) if dot > 0 else u'%s_%d' % (base, i)
+                    i += 1
+                dxf_names.add(name)
+                dxf_files.append((name, raw))
+            if has_routing:
+                ops = bom.routing_id.workcenter_lines if bom.routing_id else Wc.browse()
+            else:
+                ops = bom.operation_ids
+            op = ops[0] if ops else None
+            op_name = op.name if op else u''
+            wc = op.workcenter_id if op else None
+            # Time TARGET for the reverse import: v9 — workcenter; v10+ — operation.
+            target = wc if (time_on_wc and wc) else op
+            target_xid = _xmlid(target)
+            if time_on_wc and wc:
+                time_h = wc.time_cycle or 0.0
+            elif op is not None and 'time_cycle_manual' in op._fields:
+                time_h = (op.time_cycle_manual or 0.0) / 60.0  # min → hours
+            else:
+                time_h = 0.0
+            cap = wc[cap_field] if (wc and cap_field) else 0.0
+            wc_name = (wc.name if wc else u'') or op_name
+
+            if target_xid and target_xid not in wc_seen:
+                wc_seen[target_xid] = [wc_name, cap, time_h]
+                wc_order.append(target_xid)
+
+            lines = bom.bom_line_ids
+            if not lines:
+                bom_rows.append([bom_xid, u'', u'', u'', op_name])
+                continue
+            first = True
+            for line in lines:
+                bom_rows.append([
+                    bom_xid if first else u'',
+                    u'%s' % line.id,
+                    u'%s' % line.product_qty,
+                    line.product_id.display_name or line.product_id.name or u'',
+                    op_name if first else u'',
+                ])
+                first = False
+
+        wc_rows = [WC_HEADER]
+        for xid in wc_order:
+            name, cap, time_h = wc_seen[xid]
+            wc_rows.append([xid, name, u'%s' % cap, u'%s' % time_h])
+
+        # Pack both CSV into one ZIP (a single download from "Export").
+        # STORE (no compression) — so the LaserCAM app's pure-TS reader can read it;
+        # the CSV are small, compression gains little. Python zipfile and the OS open STORE fine.
+        buf = io.BytesIO()
+        zf = zipfile.ZipFile(buf, 'w', zipfile.ZIP_STORED)
+        zf.writestr('mrp.bom.csv', _csv(bom_rows).encode('utf-8'))
+        zf.writestr('mrp.workcenter.csv', _csv(wc_rows).encode('utf-8'))
+        for name, raw in dxf_files:  # product DXF — the app picks them up automatically
+            zf.writestr(name, raw)
+        zf.close()
+        data = buf.getvalue()
+
+        # Product code in the ZIP name (e.g. lasercam_export_00692.zip) — easier to trace.
+        suffix = u'-'.join(codes[:5])
+        zip_name = (u'lasercam_export_%s.zip' % suffix) if suffix else u'lasercam_export.zip'
+
+        return request.make_response(
+            data,
+            headers=[
+                ('Content-Type', 'application/zip'),
+                ('Content-Disposition', u'attachment; filename="%s"' % zip_name),
+            ],
+        )

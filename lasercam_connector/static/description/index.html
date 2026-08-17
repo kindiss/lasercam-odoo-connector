@@ -1,0 +1,93 @@
+<section class="oe_container">
+  <div class="oe_row oe_spaced">
+    <div class="oe_span12">
+      <h2 class="oe_slogan" style="color:#875A7B;">LaserCAM Connector</h2>
+      <h3 class="oe_slogan" style="color:#666;">Round-trip your Bills of Materials through LaserCAM sheet nesting &mdash; and get real cutting times back</h3>
+    </div>
+  </div>
+</section>
+
+<section class="oe_container oe_dark">
+  <div class="oe_row oe_spaced">
+    <div class="oe_span12">
+      <p class="oe_mt32" style="font-size:16px; text-align:justify;">
+        This module adds two actions to any <b>Bill of Materials</b>. Export the
+        BOM to <b>LaserCAM</b> (a free web-based sheet-metal nesting tool), lay out
+        your parts on the raw sheet, then import the result back into Odoo. Component
+        quantities (kg incl. cutting waste), parts-per-sheet and the sheet cutting
+        time are written straight into the BOM &mdash; no duplicates, no manual field
+        mapping.
+      </p>
+    </div>
+  </div>
+</section>
+
+<section class="oe_container">
+  <div class="oe_row oe_spaced">
+    <div class="oe_span6">
+      <h3 class="oe_slogan" style="color:#875A7B;">Export to LaserCAM</h3>
+      <p style="font-size:15px;">
+        One click on <b>Action &rarr; Export to LaserCAM</b> downloads a single ZIP
+        containing everything the nester needs: BOM line ids and quantities, the
+        sheet component, the routing operation and the work-center capacity &amp;
+        cycle time. If a DXF is attached to the product, it travels inside the ZIP
+        too, so the part geometry loads automatically.
+      </p>
+    </div>
+    <div class="oe_span6">
+      <h3 class="oe_slogan" style="color:#875A7B;">Import from LaserCAM</h3>
+      <p style="font-size:15px;">
+        Drop the file LaserCAM produces back onto <b>Action &rarr; Import from
+        LaserCAM</b>. The module updates the component quantity, parts-per-sheet and
+        the sheet cutting time in place. When the BOM has no laser work center yet,
+        it creates one (<code>Lazeris &lt;code&gt;</code>) plus its routing operation,
+        inheriting the cost/hour of your previous work center.
+      </p>
+    </div>
+  </div>
+</section>
+
+<section class="oe_container oe_dark">
+  <div class="oe_row oe_spaced">
+    <div class="oe_span12">
+      <h3 class="oe_slogan" style="color:#875A7B;">How it works</h3>
+    </div>
+  </div>
+  <div class="oe_row oe_spaced">
+    <div class="oe_span4">
+      <p class="oe_mt16" style="text-align:center;"><b>1. Export &amp; upload</b></p>
+      <img src="screenshot-1.png" class="oe_picture oe_screenshot" style="max-width:100%;"/>
+    </div>
+    <div class="oe_span4">
+      <p class="oe_mt16" style="text-align:center;"><b>2. Nest on the sheet</b></p>
+      <img src="screenshot-2.png" class="oe_picture oe_screenshot" style="max-width:100%;"/>
+    </div>
+    <div class="oe_span4">
+      <p class="oe_mt16" style="text-align:center;"><b>3. Download &amp; import back</b></p>
+      <img src="screenshot-3.png" class="oe_picture oe_screenshot" style="max-width:100%;"/>
+    </div>
+  </div>
+</section>
+
+<section class="oe_container">
+  <div class="oe_row oe_spaced">
+    <div class="oe_span12">
+      <h3 class="oe_slogan" style="color:#875A7B;">Good to know</h3>
+      <ul style="font-size:15px;">
+        <li>Works on Odoo <b>9.0 through 19.0</b> &mdash; a single code base that adapts to each version's Manufacturing model.</li>
+        <li>Enable <b>Work Orders</b> in <i>Manufacturing &rarr; Settings</i> if you want Odoo to use the imported cutting time in its scheduling and costing.</li>
+        <li>No external service is required at install time and no data leaves Odoo unless you choose to export a ZIP.</li>
+        <li>LaserCAM itself is a free web tool: <a href="https://laser.ucase.eu" target="_blank">laser.ucase.eu</a>.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section class="oe_container oe_dark">
+  <div class="oe_row oe_spaced">
+    <div class="oe_span12" style="text-align:center;">
+      <h3 class="oe_slogan" style="color:#875A7B;">Support</h3>
+      <p style="font-size:15px;">Questions or a version quirk? Email <a href="mailto:info@ucase.eu">info@ucase.eu</a>.</p>
+    </div>
+  </div>
+</section>
