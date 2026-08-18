@@ -28,9 +28,9 @@ imported cutting time (the work-center / operation time) in its calculations.
     'website': 'https://laser.ucase.eu',
     'support': 'info@ucase.eu',
     'images': [
-        'static/description/screenshot-2.png',
-        'static/description/screenshot-1.png',
         'static/description/screenshot-3.png',
+        'static/description/screenshot-1.png',
+        'static/description/screenshot-2.png',
     ],
     'depends': ['mrp'],
     'data': [
