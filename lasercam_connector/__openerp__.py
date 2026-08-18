@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 {
     'name': 'LaserCAM Connector',
-    'version': '9.0.3.0.0',
+    'version': '16.0.3.0.0',
     'category': 'Manufacturing',
     'summary': 'Export BOM data to LaserCAM nesting and import corrected quantities/times back',
     'description': """
