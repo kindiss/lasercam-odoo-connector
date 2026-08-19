@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <data>
 
-  <!-- One "LaserCAM" dialog with all three paths: Send directly (API), Export
-       (download ZIP), and Import the ZIP the app produced. Export is its own
-       section ABOVE Import, with a body button (like the upload buttons). -->
+  <!-- One "LaserCAM" dialog with all three paths. Export and Import are each their
+       own section with their own action button (like the upload buttons); only the
+       primary "Send directly" stays in the footer. -->
   <record id="view_lasercam_import_wizard" model="ir.ui.view">
     <field name="name">lasercam.wizard.form</field>
     <field name="model">lasercam.import.wizard</field>
@@ -16,16 +16,26 @@
           <b>Export</b> — download the BOM for a manual drag &amp; drop; then upload
           the result the app produces below and press <b>Import</b>.
         </div>
+
         <separator string="Export (download the BOM for LaserCAM)"/>
         <div style="display: flex; align-items: center; gap: 12px; margin: 6px 4px 14px;">
           <span style="min-width: 150px;">lasercam_export.zip</span>
           <button name="action_export" string="Download ZIP" type="object" class="btn-primary"/>
         </div>
-        <group string="Import a result (the ZIP LaserCAM produced)">
+
+        <separator string="Import a result (the ZIP LaserCAM produced)"/>
+        <group>
           <field name="zip_file" filename="zip_filename"/>
           <field name="zip_filename" invisible="1"/>
         </group>
-        <group string="Or individual CSV files (if the ZIP is already unpacked)">
+        <div style="margin: 4px 4px 12px;">
+          <button name="action_import" string="Import result" type="object" class="btn-primary"/>
+        </div>
+        <group>
+          <field name="result"/>
+        </group>
+        <separator string="Or individual CSV files (if the ZIP is already unpacked)"/>
+        <group>
           <field name="bom_file" filename="bom_filename"/>
           <field name="bom_filename" invisible="1"/>
           <field name="wc_file" filename="wc_filename"/>
@@ -33,12 +43,9 @@
           <field name="create_file" filename="create_filename"/>
           <field name="create_filename" invisible="1"/>
         </group>
-        <group>
-          <field name="result"/>
-        </group>
+
         <footer>
           <button name="action_nest" string="Send directly to LaserCAM" type="object" class="btn-primary"/>
-          <button name="action_import" string="Import result" type="object" class="btn-secondary"/>
           <button string="Close" class="btn-default" special="cancel"/>
         </footer>
       </form>
