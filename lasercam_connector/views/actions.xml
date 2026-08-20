@@ -1,18 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- <data> root — accepted in all Odoo v9-19 (unlike <openerp>/<odoo>).
-     Action menu bindings (ir.values v9-11 / binding_model_id v12+) are created
-     in the Python post_init_hook (__init__.py), since XML cannot unify them. -->
+     ONE "LaserCAM" action opens the hub wizard (Send directly / Download ZIP /
+     Import). Bound to the mrp.bom Action menu in the Python post_init_hook
+     (__init__.py), since XML cannot unify ir.values (v9-11) / binding_model_id (v12+). -->
 <data>
 
-  <record id="action_lasercam_export" model="ir.actions.act_window">
-    <field name="name">Export to LaserCAM</field>
-    <field name="res_model">lasercam.export.wizard</field>
-    <field name="view_mode">form</field>
-    <field name="target">new</field>
-  </record>
-
   <record id="action_lasercam_import" model="ir.actions.act_window">
-    <field name="name">Import from LaserCAM</field>
+    <field name="name">LaserCAM</field>
     <field name="res_model">lasercam.import.wizard</field>
     <field name="view_mode">form</field>
     <field name="target">new</field>

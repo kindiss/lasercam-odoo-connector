@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 import logging
 
+from . import models
 from . import controllers
 from . import wizard
 
@@ -8,30 +9,24 @@ _logger = logging.getLogger(__name__)
 
 
 def _bind(env):
-    """Attaches Export/Import to the mrp.bom Action menu — version-sensitive:
-    v9-11 → ir.values; v12+ → binding_model_id on act_window."""
-    AW = env['ir.actions.act_window']
-    exp = env.ref('lasercam_connector.action_lasercam_export', raise_if_not_found=False)
-    imp = env.ref('lasercam_connector.action_lasercam_import', raise_if_not_found=False)
-    if not exp or not imp:
+    """Attaches the single 'LaserCAM' action (hub: Send / Export / Import) to the
+    mrp.bom Action menu — version-sensitive: v9-11 → ir.values; v12+ → binding_model_id."""
+    act = env.ref('lasercam_connector.action_lasercam_import', raise_if_not_found=False)
+    if not act:
         return
-    if 'binding_model_id' in AW._fields:
-        # v12+ — binding directly on act_window
+    if 'binding_model_id' in act._fields:
+        # v12+ — binding directly on the action
         bom = env['ir.model'].search([('model', '=', 'mrp.bom')], limit=1)
-        for act in (exp, imp):
-            vals = {'binding_model_id': bom.id}
-            if 'binding_view_types' in AW._fields:
-                vals['binding_view_types'] = 'list,form'
-            act.write(vals)
+        vals = {'binding_model_id': bom.id}
+        if 'binding_view_types' in act._fields:
+            vals['binding_view_types'] = 'list,form'
+        act.write(vals)
     else:
         # v9-11 — via ir.values
-        IV = env['ir.values']
-        pairs = ((exp, 'Export to LaserCAM'), (imp, 'Import from LaserCAM'))
-        for act, name in pairs:
-            IV.sudo().create({
-                'model': 'mrp.bom', 'key': 'action', 'key2': 'client_action_multi',
-                'name': name, 'value': 'ir.actions.act_window,%d' % act.id,
-            })
+        env['ir.values'].sudo().create({
+            'model': 'mrp.bom', 'key': 'action', 'key2': 'client_action_multi',
+            'name': 'LaserCAM', 'value': 'ir.actions.act_window,%d' % act.id,
+        })
 
 
 def post_init(a, b=None):
