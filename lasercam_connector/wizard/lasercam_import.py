@@ -90,6 +90,31 @@ class LaserCAMImportWizard(models.TransientModel):
                 return f
         return None
 
+    def _apply_wc_capacity(self, wc, product, cap_raw):
+        """v9-17: capacity is a field ON mrp.workcenter (set in _wc_vals). v18+
+        removed it — capacity lives per product in mrp.workcenter.capacity
+        ('Product Capacities' tab). Here we upsert that record so the parts-per-
+        sheet count is visible and used. No-op where the workcenter has the field."""
+        if not wc or not product:
+            return
+        cap_raw = (u'%s' % (cap_raw or u'')).replace(',', '.')
+        if not cap_raw:
+            return
+        try:
+            cap = float(cap_raw)
+        except ValueError:
+            return
+        if self._cap_field(wc):
+            return  # v9-17 — already set on the workcenter itself
+        if 'mrp.workcenter.capacity' not in self.env:
+            return
+        Cap = self.env['mrp.workcenter.capacity']
+        rec = Cap.search([('workcenter_id', '=', wc.id), ('product_id', '=', product.id)], limit=1)
+        if rec:
+            rec.write({'capacity': cap})
+        else:
+            Cap.create({'workcenter_id': wc.id, 'product_id': product.id, 'capacity': cap})
+
     def _process_bom(self, text, msgs):
         rows = _parse_csv(text)
         if not rows:
@@ -230,6 +255,12 @@ class LaserCAMImportWizard(models.TransientModel):
             else:
                 wc = WC.create(wc_vals)
 
+            # v18+: capacity moved off the workcenter → Product Capacities record.
+            product = bom.product_id if ('product_id' in bom._fields and bom.product_id) else False
+            if not product and 'product_tmpl_id' in bom._fields and bom.product_tmpl_id:
+                product = bom.product_tmpl_id.product_variant_id
+            self._apply_wc_capacity(wc, product, get('capacity_per_cycle'))
+
             tc = get('time_cycle').replace(',', '.')
 
             def _apply_time(vals):
@@ -328,11 +359,49 @@ class LaserCAMImportWizard(models.TransientModel):
                 cf = self._cap_field(wc) if wc else None
                 if cf:
                     wc.write({cf: cap})
+                elif wc and 'bom_id' in rec._fields and rec.bom_id:
+                    # v18+: capacity via Product Capacities (per BOM product)
+                    b = rec.bom_id
+                    product = b.product_id if ('product_id' in b._fields and b.product_id) else False
+                    if not product and 'product_tmpl_id' in b._fields and b.product_tmpl_id:
+                        product = b.product_tmpl_id.product_variant_id
+                    self._apply_wc_capacity(wc, product, u'%s' % cap)
             else:
                 msgs.append(u'! Unknown model %s (%s)' % (rec._name, r[id_i]))
                 continue
             done += 1
         msgs.append(u'Work centers/operations updated: %s' % done)
+
+    # ── Hub buttons: one "LaserCAM" dialog offers all three paths ─────────────
+    def _app_url(self, token):
+        base = self.env['ir.config_parameter'].sudo().get_param('web.base.url') or u''
+        app = self.env['ir.config_parameter'].sudo().get_param('lasercam.app_url') \
+            or u'https://laser.ucase.eu/app'
+        sep = u'&' if u'?' in app else u'?'
+        return u'%s%ssrc=%s&job=%s' % (app, sep, base, token)
+
+    @_multi
+    def action_nest(self):
+        """Send directly: create a job for the selected BOM and open the app."""
+        ids = self._context.get('active_ids') or (
+            [self._context.get('active_id')] if self._context.get('active_id') else [])
+        if not ids:
+            raise UserError(u'Select a Bill of Materials first.')
+        bom = self.env['mrp.bom'].browse(ids[0]).exists()
+        if not bom:
+            raise UserError(u'Bill of Materials not found.')
+        job = self.env['lasercam.nest.job'].create({'bom_id': bom.id})
+        return {'type': 'ir.actions.act_url', 'url': self._app_url(job.token), 'target': 'new'}
+
+    @_multi
+    def action_export(self):
+        """Download the export ZIP (manual drag&drop path)."""
+        ids = self._context.get('active_ids', [])
+        return {
+            'type': 'ir.actions.act_url',
+            'url': u'/lasercam/export?ids=%s' % u','.join(str(i) for i in ids),
+            'target': 'self',
+        }
 
     @_multi
     def action_import(self):
