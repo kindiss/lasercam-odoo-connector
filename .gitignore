@@ -2,3 +2,4 @@
 *.tar.gz
 __pycache__/
 *.pyc
+lasercam_connector/static/description/preview.html
