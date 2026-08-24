@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 {
     'name': 'LaserCAM Connector',
-    'version': '12.0.4.0.2',
+    'version': '12.0.4.0.3',
     'category': 'Manufacturing',
     'summary': 'Export BOM data to LaserCAM nesting and import corrected quantities/times back',
     'description': """
@@ -28,6 +28,7 @@ imported cutting time (the work-center / operation time) in its calculations.
     'website': 'https://laser.ucase.eu',
     'support': 'info@ucase.eu',
     'images': [
+        'static/description/nesting-demo.gif',
         'static/description/screenshot-3.png',
         'static/description/screenshot-1.png',
         'static/description/screenshot-2.png',
