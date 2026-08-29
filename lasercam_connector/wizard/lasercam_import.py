@@ -193,8 +193,8 @@ class LaserCAMImportWizard(models.TransientModel):
         BOM = self.env['mrp.bom']
         # v9-13: there is `mrp.routing` + `bom.routing_id`. v14+: routing is merged into
         # the BOM, operations are directly on `bom.operation_ids` (no `mrp.routing`).
-        # Behavior is IDENTICAL: create a "Laser <code>" WC and attach ONLY it
-        # (remove the old shared WC).
+        # Behavior is IDENTICAL: add/update a "Laser <code>" operation, KEEPING any
+        # other operations on the BOM/routing intact.
         has_routing = 'routing_id' in BOM._fields
         ROUTING = self.env['mrp.routing'] if has_routing else None
         done = 0
@@ -222,10 +222,16 @@ class LaserCAMImportWizard(models.TransientModel):
             elif 'operation_ids' in bom._fields and bom.operation_ids:
                 old_wc = bom.operation_ids[0].workcenter_id
 
-            # 1) find-or-create WC "Laser <code>"; cost inherited from the old one
+            # 1) find-or-create WC "Laser <code>". If it must be created and the BOM
+            # already has a (wrongly-named) WC, COPY that one — so ALL its parameters
+            # (capacity, cost, calendar, efficiency) carry over — then rename + apply
+            # the app's corrected values. The old (shared) WC stays untouched.
             wc = WC.search([('name', '=', wc_name)], limit=1)
             wc_vals = self._wc_vals(WC, get, wc_name, code, old_wc)
             if wc:
+                wc.write(wc_vals)
+            elif old_wc:
+                wc = old_wc.copy()
                 wc.write(wc_vals)
             else:
                 wc = WC.create(wc_vals)
@@ -243,16 +249,13 @@ class LaserCAMImportWizard(models.TransientModel):
                 return vals
 
             if has_routing:
-                # v9-13: routing + operation + bom.routing_id. Reuse only if the routing
-                # is already "Laser <code>" (clear out foreign ops); otherwise — NEW.
-                routing_name = (u'Laser %s' % code) if code else (bom.display_name or u'LaserCAM')
-                routing = None
-                if old_routing and (old_routing.name or u'').strip() == routing_name.strip() \
-                        and 'workcenter_lines' in old_routing._fields:
+                # v9-13: KEEP the BOM's existing routing AND its other operations.
+                # Only add/update the laser operation. Create a routing ONLY if the
+                # BOM has none. (Other operations are never removed.)
+                if old_routing:
                     routing = old_routing
-                    for o in [x for x in old_routing.workcenter_lines if x.workcenter_id.id != wc.id]:
-                        o.unlink()
-                if routing is None:
+                else:
+                    routing_name = (u'Laser %s' % code) if code else (bom.display_name or u'LaserCAM')
                     routing = ROUTING.create({'name': routing_name})
                 op = ROP.search([('routing_id', '=', routing.id), ('workcenter_id', '=', wc.id)], limit=1)
                 op_vals = _apply_time({'routing_id': routing.id, 'workcenter_id': wc.id, 'name': wc_name})
@@ -262,19 +265,17 @@ class LaserCAMImportWizard(models.TransientModel):
                     op.write(op_vals)
                 else:
                     op = ROP.create(op_vals)
-                if 'routing_id' in bom._fields:
+                if 'routing_id' in bom._fields and not bom.routing_id:
                     bom.write({'routing_id': routing.id})
             else:
-                # v14+: operation DIRECTLY on the BOM (bom_id) + remove other operations
-                # (the old shared WC) — the analog of v9 "replace the routing".
+                # v14+: operation directly on the BOM. Add/update the laser op;
+                # KEEP all other operations (do not remove them).
                 op = ROP.search([('bom_id', '=', bom.id), ('workcenter_id', '=', wc.id)], limit=1)
                 op_vals = _apply_time({'bom_id': bom.id, 'workcenter_id': wc.id, 'name': wc_name})
                 if op:
                     op.write(op_vals)
                 else:
                     op = ROP.create(op_vals)
-                for o in ROP.search([('bom_id', '=', bom.id), ('id', '!=', op.id)]):
-                    o.unlink()
 
             # 5) BOM line kg (if provided)
             qty = get('product_qty').replace(',', '.')

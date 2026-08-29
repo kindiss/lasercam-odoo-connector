@@ -120,12 +120,15 @@ class LaserCAMController(http.Controller):
             bom_xid = _xmlid(bom)
             _tmpl = bom.product_tmpl_id if 'product_tmpl_id' in bom._fields else None
             _prod = bom.product_id if 'product_id' in bom._fields else None
+            bom_code = u''  # short product code (last >=3-digit run) — the number the app links by
             for _p in (_prod, _tmpl):
                 if _p and getattr(_p, 'default_code', None):
                     _runs = re.findall(r'\d{3,}', _p.default_code)
-                    if _runs and _runs[-1] not in codes:
-                        codes.append(_runs[-1])
+                    if _runs:
+                        bom_code = _runs[-1]
                     break
+            if bom_code and bom_code not in codes:
+                codes.append(bom_code)
             dxf = _product_dxf(env, bom)
             if dxf:
                 name, raw = dxf
@@ -140,7 +143,20 @@ class LaserCAMController(http.Controller):
                 ops = bom.routing_id.workcenter_lines if bom.routing_id else Wc.browse()
             else:
                 ops = bom.operation_ids
-            op = ops[0] if ops else None
+            # Canonical laser name from the PRODUCT code (not the actual, possibly wrong,
+            # WC name) — so the app never sees a mismatched number.
+            laser_name = (u'Laser %s' % bom_code) if bom_code else u''
+            # Identify the LASER operation: prefer the op whose WC name matches the
+            # product code; else fall back to the first operation.
+            op = None
+            if bom_code:
+                for _o in ops:
+                    _wcn = ((_o.workcenter_id.name if _o.workcenter_id else u'') or u'')
+                    if _wcn.strip() == laser_name or bom_code in _wcn:
+                        op = _o
+                        break
+            if op is None:
+                op = ops[0] if ops else None
             op_name = op.name if op else u''
             wc = op.workcenter_id if op else None
             # Time TARGET for the reverse import: v9 — workcenter; v10+ — operation.
@@ -153,15 +169,16 @@ class LaserCAMController(http.Controller):
             else:
                 time_h = 0.0
             cap = wc[cap_field] if (wc and cap_field) else 0.0
-            wc_name = (wc.name if wc else u'') or op_name
+            # EXPORTED name — always the canonical "Laser <code>" from the product code.
+            export_name = laser_name or (wc.name if wc else u'') or op_name
 
             if target_xid and target_xid not in wc_seen:
-                wc_seen[target_xid] = [wc_name, cap, time_h]
+                wc_seen[target_xid] = [export_name, cap, time_h]
                 wc_order.append(target_xid)
 
             lines = bom.bom_line_ids
             if not lines:
-                bom_rows.append([bom_xid, u'', u'', u'', op_name])
+                bom_rows.append([bom_xid, u'', u'', u'', export_name])
                 continue
             first = True
             for line in lines:
@@ -170,7 +187,7 @@ class LaserCAMController(http.Controller):
                     u'%s' % line.id,
                     u'%s' % line.product_qty,
                     line.product_id.display_name or line.product_id.name or u'',
-                    op_name if first else u'',
+                    export_name if first else u'',
                 ])
                 first = False
 
