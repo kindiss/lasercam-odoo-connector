@@ -14,6 +14,7 @@ The ZIP is unpacked with Python `zipfile` (stdlib) — no extra installs.
 """
 import base64
 import io
+import re
 import zipfile
 
 try:
@@ -89,6 +90,15 @@ class LaserCAMImportWizard(models.TransientModel):
             if f in wc._fields:
                 return f
         return None
+
+    def _relabel(self, old_name, code):
+        u"""New name for a copied routing / work center: "Laser <code>" + whatever text
+        followed the old code in the old name. E.g. "00641 Pjovimas" -> "Laser 00692
+        Pjovimas"; "Lazeris 00641" -> "Laser 00692". No >=3-digit run -> "Laser <code>"."""
+        old_name = old_name or u''
+        runs = list(re.finditer(r'\d{3,}', old_name))
+        suffix = old_name[runs[-1].end():] if runs else u''
+        return (u'Laser %s%s' % (code, suffix)).strip()
 
     def _apply_wc_capacity(self, wc, product, cap_raw):
         """v9-17: capacity is a field ON mrp.workcenter (set in _wc_vals). v18+
@@ -218,8 +228,8 @@ class LaserCAMImportWizard(models.TransientModel):
         BOM = self.env['mrp.bom']
         # v9-13: there is `mrp.routing` + `bom.routing_id`. v14+: routing is merged into
         # the BOM, operations are directly on `bom.operation_ids` (no `mrp.routing`).
-        # Behavior is IDENTICAL: create a "Laser <code>" WC and attach ONLY it
-        # (remove the old shared WC).
+        # Behavior: add/update a "Laser <code>" operation, KEEPING any other operations
+        # (threading etc.). v9-13 COPIES the whole routing when it mismatches the code.
         has_routing = 'routing_id' in BOM._fields
         ROUTING = self.env['mrp.routing'] if has_routing else None
         done = 0
@@ -229,28 +239,48 @@ class LaserCAMImportWizard(models.TransientModel):
                 return _r[i].strip() if 0 <= i < len(_r) else u''
 
             code = get('code')
-            wc_name = get('wc_name') or (u'Laser %s' % code if code else u'Laser')
 
             bom = self._find_bom(get('bom'), get('bom_db_id'))
             if not bom:
                 msgs.append(u'! BOM not found: %s' % (get('bom') or get('bom_db_id')))
                 continue
 
-            # The old (default) WC — to inherit the cost. DO NOT TOUCH (shared, used
-            # elsewhere). v9-13: from bom.routing_id; v14+: from bom.operation_ids.
+            # Find the LASER work center currently on the BOM (by WC name "laser/lazer").
+            # v9-13: from the BOM routing; v14+: from bom.operation_ids. Threading and
+            # other operations are ignored here — they are preserved, not touched.
+            def _find_laser_wc(lines):
+                for _o in lines:
+                    _wcn = (_o.workcenter_id.name if _o.workcenter_id else u'') or u''
+                    if re.search(u'la[sz]er', _wcn, re.I):
+                        return _o.workcenter_id
+                return lines[0].workcenter_id if lines else None
+
             old_wc = None
             old_routing = False
             if has_routing:
                 old_routing = bom.routing_id if bom.routing_id else False
-                if old_routing and 'workcenter_lines' in old_routing._fields and old_routing.workcenter_lines:
-                    old_wc = old_routing.workcenter_lines[0].workcenter_id
+                if old_routing and 'workcenter_lines' in old_routing._fields:
+                    old_wc = _find_laser_wc(old_routing.workcenter_lines)
             elif 'operation_ids' in bom._fields and bom.operation_ids:
-                old_wc = bom.operation_ids[0].workcenter_id
+                old_wc = _find_laser_wc(bom.operation_ids)
 
-            # 1) find-or-create WC "Laser <code>"; cost inherited from the old one
+            # Target WC name: "Laser <code>" + whatever followed the code in the old
+            # laser WC name (keeps any description). App's wc_name is the fallback.
+            if code:
+                wc_name = self._relabel(old_wc.name if old_wc else get('wc_name'), code)
+            else:
+                wc_name = get('wc_name') or u'Laser'
+
+            # 1) find-or-create WC "Laser <code>". If it must be created and the BOM
+            # already has a (wrongly-named) laser WC, COPY that one — so ALL its
+            # parameters (capacity, cost, calendar, efficiency) carry over — then rename
+            # + apply the app's corrected values. The old (shared) WC stays untouched.
             wc = WC.search([('name', '=', wc_name)], limit=1)
             wc_vals = self._wc_vals(WC, get, wc_name, code, old_wc)
             if wc:
+                wc.write(wc_vals)
+            elif old_wc:
+                wc = old_wc.copy()
                 wc.write(wc_vals)
             else:
                 wc = WC.create(wc_vals)
@@ -274,18 +304,30 @@ class LaserCAMImportWizard(models.TransientModel):
                 return vals
 
             if has_routing:
-                # v9-13: routing + operation + bom.routing_id. Reuse only if the routing
-                # is already "Laser <code>" (clear out foreign ops); otherwise — NEW.
-                routing_name = (u'Laser %s' % code) if code else (bom.display_name or u'LaserCAM')
-                routing = None
-                if old_routing and (old_routing.name or u'').strip() == routing_name.strip() \
-                        and 'workcenter_lines' in old_routing._fields:
-                    routing = old_routing
-                    for o in [x for x in old_routing.workcenter_lines if x.workcenter_id.id != wc.id]:
-                        o.unlink()
-                if routing is None:
+                # v9-13: the routing is WRONG for this product if its name doesn't match
+                # the product code. COPY the whole routing (keeps threading + all other
+                # operations), rename it, and assign the COPY to this BOM. The original
+                # routing is left untouched (it may belong to another product).
+                if old_routing:
+                    routing_name = self._relabel(old_routing.name, code) if code else (old_routing.name or u'')
+                    if (old_routing.name or u'').strip() == routing_name.strip():
+                        routing = old_routing            # already correct → reuse
+                    else:
+                        routing = old_routing.copy({'name': routing_name})
+                else:
+                    routing_name = (u'Laser %s' % code) if code else (bom.display_name or u'LaserCAM')
                     routing = ROUTING.create({'name': routing_name})
-                op = ROP.search([('routing_id', '=', routing.id), ('workcenter_id', '=', wc.id)], limit=1)
+                # Point the laser operation (identified by WC name) at the "Laser <code>"
+                # WC; keep every other operation (threading etc.) exactly as it is.
+                op = None
+                if 'workcenter_lines' in routing._fields:
+                    for _o in routing.workcenter_lines:
+                        _wcn = (_o.workcenter_id.name if _o.workcenter_id else u'') or u''
+                        if re.search(u'la[sz]er', _wcn, re.I):
+                            op = _o
+                            break
+                if op is None:
+                    op = ROP.search([('routing_id', '=', routing.id), ('workcenter_id', '=', wc.id)], limit=1)
                 op_vals = _apply_time({'routing_id': routing.id, 'workcenter_id': wc.id, 'name': wc_name})
                 if 'cycle_nbr' in ROP._fields:
                     op_vals['cycle_nbr'] = 1.0
@@ -296,16 +338,14 @@ class LaserCAMImportWizard(models.TransientModel):
                 if 'routing_id' in bom._fields:
                     bom.write({'routing_id': routing.id})
             else:
-                # v14+: operation DIRECTLY on the BOM (bom_id) + remove other operations
-                # (the old shared WC) — the analog of v9 "replace the routing".
+                # v14+: operation directly on the BOM. Add/update the laser op;
+                # KEEP all other operations (do not remove them).
                 op = ROP.search([('bom_id', '=', bom.id), ('workcenter_id', '=', wc.id)], limit=1)
                 op_vals = _apply_time({'bom_id': bom.id, 'workcenter_id': wc.id, 'name': wc_name})
                 if op:
                     op.write(op_vals)
                 else:
                     op = ROP.create(op_vals)
-                for o in ROP.search([('bom_id', '=', bom.id), ('id', '!=', op.id)]):
-                    o.unlink()
 
             # 5) BOM line kg (if provided)
             qty = get('product_qty').replace(',', '.')

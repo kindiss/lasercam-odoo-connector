@@ -91,10 +91,10 @@ def _product_dxf(env, bom):
         if not raw:
             continue
         # Ensure the code is in the file name — the app links DXF↔BOM by code.
-        # We prefix ONLY with the short code (last run of ≥3 digits, like the app's
-        # codeFrom) and only if it is not already there — to avoid a doubled name.
+        # We prefix ONLY with the product code (FIRST run of ≥3 digits, e.g.
+        # "17154-LANE-3600" -> 17154) and only if not already there (avoid doubling).
         runs = re.findall(r'\d{3,}', code or u'')
-        short = runs[-1] if runs else u''
+        short = runs[0] if runs else u''
         if short and short not in fname:
             fname = u'%s_%s' % (short, fname)
         return (fname, base64.b64decode(raw))
@@ -125,12 +125,15 @@ def _collect(env, boms):
         bom_xid = _xmlid(bom)
         _tmpl = bom.product_tmpl_id if 'product_tmpl_id' in bom._fields else None
         _prod = bom.product_id if 'product_id' in bom._fields else None
+        bom_code = u''  # product code = FIRST >=3-digit run, e.g. "17154-LANE-3600" -> 17154
         for _p in (_prod, _tmpl):
             if _p and getattr(_p, 'default_code', None):
                 _runs = re.findall(r'\d{3,}', _p.default_code)
-                if _runs and _runs[-1] not in codes:
-                    codes.append(_runs[-1])
+                if _runs:
+                    bom_code = _runs[0]
                 break
+        if bom_code and bom_code not in codes:
+            codes.append(bom_code)
         dxf = _product_dxf(env, bom)
         if dxf:
             name, raw = dxf
@@ -145,7 +148,18 @@ def _collect(env, boms):
             ops = bom.routing_id.workcenter_lines if bom.routing_id else Wc.browse()
         else:
             ops = bom.operation_ids
-        op = ops[0] if ops else None
+        # Canonical laser name from the PRODUCT code (not the actual, possibly wrong, WC
+        # name). Pick the LASER op by matching that code; else the first op (fallback).
+        laser_name = (u'Laser %s' % bom_code) if bom_code else u''
+        op = None
+        if bom_code:
+            for _o in ops:
+                _wcn = ((_o.workcenter_id.name if _o.workcenter_id else u'') or u'')
+                if _wcn.strip() == laser_name or bom_code in _wcn:
+                    op = _o
+                    break
+        if op is None:
+            op = ops[0] if ops else None
         op_name = op.name if op else u''
         wc = op.workcenter_id if op else None
         # Time TARGET for the reverse import: v9 — workcenter; v10+ — operation.
@@ -158,7 +172,10 @@ def _collect(env, boms):
         else:
             time_h = 0.0
         cap = wc[cap_field] if (wc and cap_field) else 0.0
-        wc_name = (wc.name if wc else u'') or op_name
+        wc_name = (wc.name if wc else u'') or op_name  # ACTUAL WC name (for the WC CSV)
+        # BOM op-name column = canonical "Laser <code>" so the app extracts the CORRECT
+        # number; WC CSV keeps ACTUAL name so the app sees no "Laser <code>" WC -> CREATE.
+        export_name = laser_name or wc_name
 
         if target_xid and target_xid not in wc_seen:
             wc_seen[target_xid] = [wc_name, cap, time_h]
@@ -166,7 +183,7 @@ def _collect(env, boms):
 
         lines = bom.bom_line_ids
         if not lines:
-            bom_rows.append([bom_xid, u'', u'', u'', op_name])
+            bom_rows.append([bom_xid, u'', u'', u'', export_name])
             continue
         first = True
         for line in lines:
@@ -175,7 +192,7 @@ def _collect(env, boms):
                 u'%s' % line.id,
                 u'%s' % line.product_qty,
                 line.product_id.display_name or line.product_id.name or u'',
-                op_name if first else u'',
+                export_name if first else u'',
             ])
             first = False
 
