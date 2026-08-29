@@ -81,10 +81,10 @@ def _product_dxf(env, bom):
         if not raw:
             continue
         # Ensure the code is in the file name — the app links DXF↔BOM by code.
-        # We prefix ONLY with the short code (last run of ≥3 digits, like the app's
-        # codeFrom) and only if it is not already there — to avoid a doubled name.
+        # We prefix ONLY with the product code (FIRST run of ≥3 digits, e.g.
+        # "17154-LANE-3600" -> 17154) and only if not already there (avoid doubling).
         runs = re.findall(r'\d{3,}', code or u'')
-        short = runs[-1] if runs else u''
+        short = runs[0] if runs else u''
         if short and short not in fname:
             fname = u'%s_%s' % (short, fname)
         return (fname, base64.b64decode(raw))
@@ -120,12 +120,13 @@ class LaserCAMController(http.Controller):
             bom_xid = _xmlid(bom)
             _tmpl = bom.product_tmpl_id if 'product_tmpl_id' in bom._fields else None
             _prod = bom.product_id if 'product_id' in bom._fields else None
-            bom_code = u''  # short product code (last >=3-digit run) — the number the app links by
+            bom_code = u''  # product code = FIRST >=3-digit run of default_code, e.g.
+            # "17154-LANE-3600-LOCK-..." -> 17154 (NOT 3600). The app links by this number.
             for _p in (_prod, _tmpl):
                 if _p and getattr(_p, 'default_code', None):
                     _runs = re.findall(r'\d{3,}', _p.default_code)
                     if _runs:
-                        bom_code = _runs[-1]
+                        bom_code = _runs[0]
                     break
             if bom_code and bom_code not in codes:
                 codes.append(bom_code)
