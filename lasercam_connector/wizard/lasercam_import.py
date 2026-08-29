@@ -100,6 +100,14 @@ class LaserCAMImportWizard(models.TransientModel):
         suffix = old_name[runs[-1].end():] if runs else u''
         return (u'Laser %s%s' % (code, suffix)).strip()
 
+    def _op_lines(self, routing):
+        u"""Routing operations o2m: v9-11 `workcenter_lines`, v12-13 `operation_ids`."""
+        if routing and 'workcenter_lines' in routing._fields:
+            return routing.workcenter_lines
+        if routing and 'operation_ids' in routing._fields:
+            return routing.operation_ids
+        return routing[:0] if routing else routing
+
     def _apply_wc_capacity(self, wc, product, cap_raw):
         """v9-17: capacity is a field ON mrp.workcenter (set in _wc_vals). v18+
         removed it — capacity lives per product in mrp.workcenter.capacity
@@ -259,8 +267,8 @@ class LaserCAMImportWizard(models.TransientModel):
             old_routing = False
             if has_routing:
                 old_routing = bom.routing_id if bom.routing_id else False
-                if old_routing and 'workcenter_lines' in old_routing._fields:
-                    old_wc = _find_laser_wc(old_routing.workcenter_lines)
+                if old_routing:
+                    old_wc = _find_laser_wc(self._op_lines(old_routing))
             elif 'operation_ids' in bom._fields and bom.operation_ids:
                 old_wc = _find_laser_wc(bom.operation_ids)
 
@@ -320,12 +328,11 @@ class LaserCAMImportWizard(models.TransientModel):
                 # Point the laser operation (identified by WC name) at the "Laser <code>"
                 # WC; keep every other operation (threading etc.) exactly as it is.
                 op = None
-                if 'workcenter_lines' in routing._fields:
-                    for _o in routing.workcenter_lines:
-                        _wcn = (_o.workcenter_id.name if _o.workcenter_id else u'') or u''
-                        if re.search(u'la[sz]er', _wcn, re.I):
-                            op = _o
-                            break
+                for _o in self._op_lines(routing):
+                    _wcn = (_o.workcenter_id.name if _o.workcenter_id else u'') or u''
+                    if re.search(u'la[sz]er', _wcn, re.I):
+                        op = _o
+                        break
                 if op is None:
                     op = ROP.search([('routing_id', '=', routing.id), ('workcenter_id', '=', wc.id)], limit=1)
                 op_vals = _apply_time({'routing_id': routing.id, 'workcenter_id': wc.id, 'name': wc_name})
