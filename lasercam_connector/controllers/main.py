@@ -145,7 +145,12 @@ def _collect(env, boms):
             dxf_names.add(name)
             dxf_files.append((name, raw))
         if has_routing:
-            ops = bom.routing_id.workcenter_lines if bom.routing_id else Wc.browse()
+            rt = bom.routing_id
+            if rt:
+                # routing operations o2m: v9-11 `workcenter_lines`; v12-13 `operation_ids`
+                ops = rt.workcenter_lines if 'workcenter_lines' in rt._fields else rt.operation_ids
+            else:
+                ops = Wc.browse()
         else:
             ops = bom.operation_ids
         # Canonical laser name from the PRODUCT code (not the actual, possibly wrong, WC
