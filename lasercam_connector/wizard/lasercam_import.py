@@ -14,6 +14,7 @@ The ZIP is unpacked with Python `zipfile` (stdlib) — no extra installs.
 """
 import base64
 import io
+import re
 import zipfile
 
 try:
@@ -89,6 +90,15 @@ class LaserCAMImportWizard(models.TransientModel):
             if f in wc._fields:
                 return f
         return None
+
+    def _relabel(self, old_name, code):
+        u"""New name for a copied routing / work center: "Laser <code>" + whatever text
+        followed the old code in the old name. E.g. "00641 Pjovimas" -> "Laser 00692
+        Pjovimas"; "Lazeris 00641" -> "Laser 00692". No >=3-digit run -> "Laser <code>"."""
+        old_name = old_name or u''
+        runs = list(re.finditer(r'\d{3,}', old_name))
+        suffix = old_name[runs[-1].end():] if runs else u''
+        return (u'Laser %s%s' % (code, suffix)).strip()
 
     def _process_bom(self, text, msgs):
         rows = _parse_csv(text)
@@ -204,23 +214,37 @@ class LaserCAMImportWizard(models.TransientModel):
                 return _r[i].strip() if 0 <= i < len(_r) else u''
 
             code = get('code')
-            wc_name = get('wc_name') or (u'Laser %s' % code if code else u'Laser')
 
             bom = self._find_bom(get('bom'), get('bom_db_id'))
             if not bom:
                 msgs.append(u'! BOM not found: %s' % (get('bom') or get('bom_db_id')))
                 continue
 
-            # The old (default) WC — to inherit the cost. DO NOT TOUCH (shared, used
-            # elsewhere). v9-13: from bom.routing_id; v14+: from bom.operation_ids.
+            # Find the LASER work center currently on the BOM (by WC name "laser/lazer").
+            # v9-13: from the BOM routing; v14+: from bom.operation_ids. Threading and
+            # other operations are ignored here — they are preserved, not touched.
+            def _find_laser_wc(lines):
+                for _o in lines:
+                    _wcn = (_o.workcenter_id.name if _o.workcenter_id else u'') or u''
+                    if re.search(u'la[sz]er', _wcn, re.I):
+                        return _o.workcenter_id
+                return lines[0].workcenter_id if lines else None
+
             old_wc = None
             old_routing = False
             if has_routing:
                 old_routing = bom.routing_id if bom.routing_id else False
-                if old_routing and 'workcenter_lines' in old_routing._fields and old_routing.workcenter_lines:
-                    old_wc = old_routing.workcenter_lines[0].workcenter_id
+                if old_routing and 'workcenter_lines' in old_routing._fields:
+                    old_wc = _find_laser_wc(old_routing.workcenter_lines)
             elif 'operation_ids' in bom._fields and bom.operation_ids:
-                old_wc = bom.operation_ids[0].workcenter_id
+                old_wc = _find_laser_wc(bom.operation_ids)
+
+            # Target WC name: "Laser <code>" + whatever followed the code in the old
+            # laser WC name (keeps any description). App's wc_name is the fallback.
+            if code:
+                wc_name = self._relabel(old_wc.name if old_wc else get('wc_name'), code)
+            else:
+                wc_name = get('wc_name') or u'Laser'
 
             # 1) find-or-create WC "Laser <code>". If it must be created and the BOM
             # already has a (wrongly-named) WC, COPY that one — so ALL its parameters
@@ -249,15 +273,30 @@ class LaserCAMImportWizard(models.TransientModel):
                 return vals
 
             if has_routing:
-                # v9-13: KEEP the BOM's existing routing AND its other operations.
-                # Only add/update the laser operation. Create a routing ONLY if the
-                # BOM has none. (Other operations are never removed.)
+                # v9-13: the routing is WRONG for this product if its name doesn't match
+                # the product code. COPY the whole routing (keeps threading + all other
+                # operations), rename it, and assign the COPY to this BOM. The original
+                # routing is left untouched (it may belong to another product).
                 if old_routing:
-                    routing = old_routing
+                    routing_name = self._relabel(old_routing.name, code) if code else (old_routing.name or u'')
+                    if (old_routing.name or u'').strip() == routing_name.strip():
+                        routing = old_routing            # already correct → reuse
+                    else:
+                        routing = old_routing.copy({'name': routing_name})
                 else:
                     routing_name = (u'Laser %s' % code) if code else (bom.display_name or u'LaserCAM')
                     routing = ROUTING.create({'name': routing_name})
-                op = ROP.search([('routing_id', '=', routing.id), ('workcenter_id', '=', wc.id)], limit=1)
+                # Point the laser operation (identified by WC name) at the "Laser <code>"
+                # WC; keep every other operation (threading etc.) exactly as it is.
+                op = None
+                if 'workcenter_lines' in routing._fields:
+                    for _o in routing.workcenter_lines:
+                        _wcn = (_o.workcenter_id.name if _o.workcenter_id else u'') or u''
+                        if re.search(u'la[sz]er', _wcn, re.I):
+                            op = _o
+                            break
+                if op is None:
+                    op = ROP.search([('routing_id', '=', routing.id), ('workcenter_id', '=', wc.id)], limit=1)
                 op_vals = _apply_time({'routing_id': routing.id, 'workcenter_id': wc.id, 'name': wc_name})
                 if 'cycle_nbr' in ROP._fields:
                     op_vals['cycle_nbr'] = 1.0
@@ -265,7 +304,7 @@ class LaserCAMImportWizard(models.TransientModel):
                     op.write(op_vals)
                 else:
                     op = ROP.create(op_vals)
-                if 'routing_id' in bom._fields and not bom.routing_id:
+                if 'routing_id' in bom._fields:
                     bom.write({'routing_id': routing.id})
             else:
                 # v14+: operation directly on the BOM. Add/update the laser op;

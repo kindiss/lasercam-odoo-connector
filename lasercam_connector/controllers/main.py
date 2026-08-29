@@ -169,11 +169,14 @@ class LaserCAMController(http.Controller):
             else:
                 time_h = 0.0
             cap = wc[cap_field] if (wc and cap_field) else 0.0
-            # EXPORTED name — always the canonical "Laser <code>" from the product code.
-            export_name = laser_name or (wc.name if wc else u'') or op_name
+            wc_name = (wc.name if wc else u'') or op_name  # ACTUAL WC name (for the WC CSV)
+            # BOM op-name column = canonical "Laser <code>" from the product code, so the
+            # app extracts the CORRECT number. The WC CSV keeps the ACTUAL name, so the app
+            # can tell that a "Laser <code>" WC does NOT yet exist -> CREATE mode (rename).
+            export_name = laser_name or wc_name
 
             if target_xid and target_xid not in wc_seen:
-                wc_seen[target_xid] = [export_name, cap, time_h]
+                wc_seen[target_xid] = [wc_name, cap, time_h]
                 wc_order.append(target_xid)
 
             lines = bom.bom_line_ids
