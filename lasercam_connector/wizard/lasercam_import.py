@@ -14,6 +14,8 @@ The ZIP is unpacked with Python `zipfile` (stdlib) — no extra installs.
 """
 import base64
 import io
+import json
+import re
 import zipfile
 
 try:
@@ -187,6 +189,20 @@ class LaserCAMImportWizard(models.TransientModel):
             return
         head = [h.strip().lower() for h in rows[0]]
         idx = dict((name, i) for i, name in enumerate(head))
+        done = 0
+        for r in rows[1:]:
+            def get(key, _r=r):
+                i = idx.get(key, -1)
+                return _r[i].strip() if 0 <= i < len(_r) else u''
+
+            if self._create_one(get, msgs):
+                done += 1
+        msgs.append(u'Routings/work centers created/updated: %s' % done)
+
+    def _create_one(self, get, msgs):
+        u"""ONE routing_create row (``get(key)`` -> str). Shared by the CSV path
+        (_process_create) and the new-products path (_process_products).
+        Returns True when the BOM was found and the WC/operation written."""
         WC = self.env['mrp.workcenter']
         ROP = self.env['mrp.routing.workcenter']  # operation model (v9-19; the name stayed)
         BL = self.env['mrp.bom.line']
@@ -197,102 +213,249 @@ class LaserCAMImportWizard(models.TransientModel):
         # (remove the old shared WC).
         has_routing = 'routing_id' in BOM._fields
         ROUTING = self.env['mrp.routing'] if has_routing else None
-        done = 0
-        for r in rows[1:]:
-            def get(key, _r=r):
-                i = idx.get(key, -1)
-                return _r[i].strip() if 0 <= i < len(_r) else u''
+        code = get('code')
+        wc_name = get('wc_name') or (u'Laser %s' % code if code else u'Laser')
 
-            code = get('code')
-            wc_name = get('wc_name') or (u'Laser %s' % code if code else u'Laser')
+        bom = self._find_bom(get('bom'), get('bom_db_id'))
+        if not bom:
+            msgs.append(u'! BOM not found: %s' % (get('bom') or get('bom_db_id')))
+            return False
 
-            bom = self._find_bom(get('bom'), get('bom_db_id'))
-            if not bom:
-                msgs.append(u'! BOM not found: %s' % (get('bom') or get('bom_db_id')))
-                continue
+        # The old (default) WC — to inherit the cost. DO NOT TOUCH (shared, used
+        # elsewhere). v9-13: from bom.routing_id; v14+: from bom.operation_ids.
+        old_wc = None
+        old_routing = False
+        if has_routing:
+            old_routing = bom.routing_id if bom.routing_id else False
+            if old_routing and 'workcenter_lines' in old_routing._fields and old_routing.workcenter_lines:
+                old_wc = old_routing.workcenter_lines[0].workcenter_id
+        elif 'operation_ids' in bom._fields and bom.operation_ids:
+            old_wc = bom.operation_ids[0].workcenter_id
 
-            # The old (default) WC — to inherit the cost. DO NOT TOUCH (shared, used
-            # elsewhere). v9-13: from bom.routing_id; v14+: from bom.operation_ids.
-            old_wc = None
-            old_routing = False
-            if has_routing:
-                old_routing = bom.routing_id if bom.routing_id else False
-                if old_routing and 'workcenter_lines' in old_routing._fields and old_routing.workcenter_lines:
-                    old_wc = old_routing.workcenter_lines[0].workcenter_id
-            elif 'operation_ids' in bom._fields and bom.operation_ids:
-                old_wc = bom.operation_ids[0].workcenter_id
+        # 1) find-or-create WC "Laser <code>"; cost inherited from the old one
+        wc = WC.search([('name', '=', wc_name)], limit=1)
+        wc_vals = self._wc_vals(WC, get, wc_name, code, old_wc)
+        if wc:
+            wc.write(wc_vals)
+        else:
+            wc = WC.create(wc_vals)
 
-            # 1) find-or-create WC "Laser <code>"; cost inherited from the old one
-            wc = WC.search([('name', '=', wc_name)], limit=1)
-            wc_vals = self._wc_vals(WC, get, wc_name, code, old_wc)
-            if wc:
-                wc.write(wc_vals)
-            else:
-                wc = WC.create(wc_vals)
+        tc = get('time_cycle').replace(',', '.')
 
-            tc = get('time_cycle').replace(',', '.')
+        def _apply_time(vals):
+            if tc and 'time_cycle_manual' in ROP._fields:  # v10+ — minutes
+                try:
+                    vals['time_cycle_manual'] = float(tc) * 60.0
+                    if 'time_mode' in ROP._fields:
+                        vals['time_mode'] = 'manual'
+                except ValueError:
+                    pass
+            return vals
 
-            def _apply_time(vals):
-                if tc and 'time_cycle_manual' in ROP._fields:  # v10+ — minutes
-                    try:
-                        vals['time_cycle_manual'] = float(tc) * 60.0
-                        if 'time_mode' in ROP._fields:
-                            vals['time_mode'] = 'manual'
-                    except ValueError:
-                        pass
-                return vals
-
-            if has_routing:
-                # v9-13: routing + operation + bom.routing_id. Reuse only if the routing
-                # is already "Laser <code>" (clear out foreign ops); otherwise — NEW.
-                routing_name = (u'Laser %s' % code) if code else (bom.display_name or u'LaserCAM')
-                routing = None
-                if old_routing and (old_routing.name or u'').strip() == routing_name.strip() \
-                        and 'workcenter_lines' in old_routing._fields:
-                    routing = old_routing
-                    for o in [x for x in old_routing.workcenter_lines if x.workcenter_id.id != wc.id]:
-                        o.unlink()
-                if routing is None:
-                    routing = ROUTING.create({'name': routing_name})
-                op = ROP.search([('routing_id', '=', routing.id), ('workcenter_id', '=', wc.id)], limit=1)
-                op_vals = _apply_time({'routing_id': routing.id, 'workcenter_id': wc.id, 'name': wc_name})
-                if 'cycle_nbr' in ROP._fields:
-                    op_vals['cycle_nbr'] = 1.0
-                if op:
-                    op.write(op_vals)
-                else:
-                    op = ROP.create(op_vals)
-                if 'routing_id' in bom._fields:
-                    bom.write({'routing_id': routing.id})
-            else:
-                # v14+: operation DIRECTLY on the BOM (bom_id) + remove other operations
-                # (the old shared WC) — the analog of v9 "replace the routing".
-                op = ROP.search([('bom_id', '=', bom.id), ('workcenter_id', '=', wc.id)], limit=1)
-                op_vals = _apply_time({'bom_id': bom.id, 'workcenter_id': wc.id, 'name': wc_name})
-                if op:
-                    op.write(op_vals)
-                else:
-                    op = ROP.create(op_vals)
-                for o in ROP.search([('bom_id', '=', bom.id), ('id', '!=', op.id)]):
+        if has_routing:
+            # v9-13: routing + operation + bom.routing_id. Reuse only if the routing
+            # is already "Laser <code>" (clear out foreign ops); otherwise — NEW.
+            routing_name = (u'Laser %s' % code) if code else (bom.display_name or u'LaserCAM')
+            routing = None
+            if old_routing and (old_routing.name or u'').strip() == routing_name.strip() \
+                    and 'workcenter_lines' in old_routing._fields:
+                routing = old_routing
+                for o in [x for x in old_routing.workcenter_lines if x.workcenter_id.id != wc.id]:
                     o.unlink()
+            if routing is None:
+                routing = ROUTING.create({'name': routing_name})
+            op = ROP.search([('routing_id', '=', routing.id), ('workcenter_id', '=', wc.id)], limit=1)
+            op_vals = _apply_time({'routing_id': routing.id, 'workcenter_id': wc.id, 'name': wc_name})
+            if 'cycle_nbr' in ROP._fields:
+                op_vals['cycle_nbr'] = 1.0
+            if op:
+                op.write(op_vals)
+            else:
+                op = ROP.create(op_vals)
+            if 'routing_id' in bom._fields:
+                bom.write({'routing_id': routing.id})
+        else:
+            # v14+: operation DIRECTLY on the BOM (bom_id) + remove other operations
+            # (the old shared WC) — the analog of v9 "replace the routing".
+            op = ROP.search([('bom_id', '=', bom.id), ('workcenter_id', '=', wc.id)], limit=1)
+            op_vals = _apply_time({'bom_id': bom.id, 'workcenter_id': wc.id, 'name': wc_name})
+            if op:
+                op.write(op_vals)
+            else:
+                op = ROP.create(op_vals)
+            for o in ROP.search([('bom_id', '=', bom.id), ('id', '!=', op.id)]):
+                o.unlink()
 
-            # 5) BOM line kg (if provided)
-            qty = get('product_qty').replace(',', '.')
-            if qty:
+        # 5) BOM line kg (if provided)
+        qty = get('product_qty').replace(',', '.')
+        if qty:
+            line = None
+            bl_db = get('bom_line_db_id')
+            bl_x = get('bom_line_id')
+            if bl_db.isdigit():
+                line = BL.browse(int(bl_db)).exists()
+            elif bl_x:
+                line = self.env.ref(bl_x, raise_if_not_found=False)
+            if line:
+                try:
+                    line.write({'product_qty': float(qty)})
+                except ValueError:
+                    pass
+        return True
+
+    # ── New products from DXF (F2): ``create_products`` payload ─────────────────
+    # {template_code, material{odoo_code,name,thickness,density},
+    #  products[{code,name,kg_per_unit,minutes_per_unit,qty_nested,per_sheet,
+    #            dxf_base64,dxf_filename}]}
+    # New product = copy() of the TEMPLATE (the last exported product — remembered by
+    # the export / nest_job endpoints; inherits every field incl. custom ones)
+    # -> BOM with the sheet-material line (kg/unit incl. waste) -> "Laser <code>" work
+    # center + operation (via _create_one) -> DXF attachment (so "Nest in LaserCAM"
+    # works next time). Existing code -> update path (idempotent).
+
+    def _kg_uom(self):
+        for xid in ('uom.product_uom_kgm', 'product.product_uom_kgm'):
+            rec = self.env.ref(xid, raise_if_not_found=False)
+            if rec:
+                return rec
+        model = 'uom.uom' if 'uom.uom' in self.env else 'product.uom'
+        return self.env[model].search([('name', 'ilike', 'kg')], limit=1)
+
+    def _storable_vals(self, PT):
+        u"""Product type vals: v18+ type=consu + is_storable; v9-17 type=product."""
+        f = PT._fields
+        if 'is_storable' in f:
+            return {'type': 'consu', 'is_storable': True}
+        if 'detailed_type' in f:
+            return {'detailed_type': 'product'}
+        return {'type': 'product'}
+
+    def _template_product(self, code):
+        u"""Template for copy(): explicit code from the app, else the remembered
+        last-exported product (ir.config_parameter lasercam.template_product_tmpl_id)."""
+        PT = self.env['product.template']
+        if code:
+            t = PT.search([('default_code', '=', code)], limit=1)
+            if t:
+                return t
+        pid = self.env['ir.config_parameter'].sudo().get_param('lasercam.template_product_tmpl_id')
+        if pid and (u'%s' % pid).strip().isdigit():
+            t = PT.browse(int(pid)).exists()
+            if t:
+                return t
+        return PT.browse()
+
+    def _find_or_create_material(self, mat, res, msgs):
+        PP = self.env['product.product']
+        code = (mat.get('odoo_code') or u'').strip()
+        name = (mat.get('name') or u'').strip()
+        # Odoo display_name "[CODE] Name" (the BOM line from the export) -> code + name.
+        m = re.match(r'^\[(.+?)\]\s*(.*)$', name)
+        if m:
+            code = code or m.group(1).strip()
+            name = m.group(2).strip() or name
+        if code:
+            p = PP.search([('default_code', '=', code)], limit=1)
+            if p:
+                return p
+        if not name:
+            return PP.browse()
+        p = PP.search([('name', '=', name)], limit=1)
+        if p:
+            return p
+        vals = {'name': name}
+        if code:
+            vals['default_code'] = code
+        kg = self._kg_uom()
+        if kg:
+            vals['uom_id'] = kg.id
+            if 'uom_po_id' in PP._fields:
+                vals['uom_po_id'] = kg.id
+        vals.update(self._storable_vals(PP))
+        p = PP.create(vals)
+        res['material_created'] = True
+        msgs.append(u'Material created: %s' % name)
+        return p
+
+    def _attach_dxf(self, tmpl, fname, b64):
+        Att = self.env['ir.attachment']
+        old = Att.search([('res_model', '=', 'product.template'), ('res_id', '=', tmpl.id),
+                          ('name', '=', fname)], limit=1)
+        if old:
+            old.write({'datas': b64})
+            return
+        vals = {'name': fname, 'res_model': 'product.template', 'res_id': tmpl.id,
+                'type': 'binary', 'datas': b64}
+        if 'datas_fname' in Att._fields:  # v9-12
+            vals['datas_fname'] = fname
+        Att.create(vals)
+
+    def _process_products(self, payload, msgs):
+        PT = self.env['product.template']
+        BOM = self.env['mrp.bom']
+        BL = self.env['mrp.bom.line']
+        res = {'created': [], 'updated': [], 'material_created': False, 'errors': []}
+        tmpl = self._template_product((payload.get('template_code') or u'').strip())
+        mat = self._find_or_create_material(payload.get('material') or {}, res, msgs)
+        kg_uom = self._kg_uom()
+        for pr in payload.get('products') or []:
+            code = (pr.get('code') or u'').strip()
+            name = (pr.get('name') or code).strip()
+            if not code:
+                res['errors'].append(u'product without code: %s' % name)
+                continue
+            existing = PT.search([('default_code', '=', code)], limit=1)
+            if existing:
+                new = existing
+                res['updated'].append(code)
+            elif tmpl:
+                new = tmpl.copy({'name': name})
+                new.write({'name': name, 'default_code': code})
+                res['created'].append(code)
+            else:
+                vals = {'name': name, 'default_code': code}
+                vals.update(self._storable_vals(PT))
+                new = PT.create(vals)
+                res['created'].append(code)
+            # BOM (one per product) + sheet-material line (kg/unit incl. waste).
+            bom = BOM.search([('product_tmpl_id', '=', new.id)], limit=1)
+            if not bom:
+                bvals = {'product_tmpl_id': new.id, 'product_qty': 1.0}
+                if 'type' in BOM._fields:
+                    bvals['type'] = 'normal'
+                bom = BOM.create(bvals)
+            kg = pr.get('kg_per_unit')
+            if mat and kg is not None:
                 line = None
-                bl_db = get('bom_line_db_id')
-                bl_x = get('bom_line_id')
-                if bl_db.isdigit():
-                    line = BL.browse(int(bl_db)).exists()
-                elif bl_x:
-                    line = self.env.ref(bl_x, raise_if_not_found=False)
+                for bl in bom.bom_line_ids:
+                    if bl.product_id.id == mat.id:
+                        line = bl
+                        break
                 if line:
-                    try:
-                        line.write({'product_qty': float(qty)})
-                    except ValueError:
-                        pass
-            done += 1
-        msgs.append(u'Routings/work centers created/updated: %s' % done)
+                    line.write({'product_qty': float(kg)})
+                else:
+                    lvals = {'bom_id': bom.id, 'product_id': mat.id, 'product_qty': float(kg)}
+                    for uf in ('product_uom_id', 'product_uom'):
+                        if uf in BL._fields and kg_uom:
+                            lvals[uf] = kg_uom.id
+                            break
+                    BL.create(lvals)
+            # "Laser <code>" work center + operation: capacity = parts per sheet,
+            # cycle time (hours) = min/unit x parts per sheet / 60 (Odoo: min/unit back).
+            minutes = pr.get('minutes_per_unit')
+            per_sheet = pr.get('per_sheet') or pr.get('qty_nested') or 1
+            row = {
+                'bom_db_id': u'%s' % bom.id, 'code': code, 'wc_name': u'Laser %s' % code,
+                'capacity_per_cycle': u'%s' % per_sheet,
+                'time_cycle': (u'%s' % (float(minutes) * float(per_sheet) / 60.0)) if minutes is not None else u'',
+            }
+            self._create_one(lambda k, _r=row: _r.get(k, u''), msgs)
+            b64 = pr.get('dxf_base64')
+            if b64:
+                self._attach_dxf(new, pr.get('dxf_filename') or (u'%s.dxf' % code), b64)
+        msgs.append(u'Products created: %s, updated: %s' % (len(res['created']), len(res['updated'])))
+        return res
+
 
     def _process_wc(self, text, msgs):
         rows = _parse_csv(text)
@@ -341,6 +504,7 @@ class LaserCAMImportWizard(models.TransientModel):
         bom_text = None
         wc_text = None
         create_text = None
+        products_json = None  # F5: nauji produktai (kaip create_products payload) ZIP'e
 
         # 1) ZIP (the main path — the LaserCAM "Odoo fixes" output).
         if self.zip_file:
@@ -351,6 +515,9 @@ class LaserCAMImportWizard(models.TransientModel):
                 raise UserError(u'Could not open the ZIP file (is it lasercam_fixes.zip?)')
             for name in zf.namelist():
                 low = name.lower()
+                if low.endswith('products.json'):
+                    products_json = self._to_text(zf.read(name))
+                    continue
                 if not low.endswith('.csv'):
                     continue
                 content = self._to_text(zf.read(name))
@@ -370,6 +537,13 @@ class LaserCAMImportWizard(models.TransientModel):
         if self.create_file:
             create_text = self._to_text(base64.b64decode(self.create_file))
 
+        # F5: NAUJI produktai pirmiau (kad jų BOM/WC jau būtų), tada esamų pataisymai.
+        if products_json:
+            try:
+                payload = json.loads(products_json)
+            except ValueError as e:
+                raise UserError(u'products.json: %s' % e)
+            self._process_products(payload, msgs)
         if create_text:
             self._process_create(create_text, msgs)
         if bom_text:
