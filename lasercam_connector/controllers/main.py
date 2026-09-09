@@ -297,7 +297,7 @@ class LaserCAMController(http.Controller):
         wc_csv = kw.get('wc_csv') or u''
         if not (create_csv or bom_csv or wc_csv):  # raw JSON body fallback
             try:
-                body = json.loads(request.httprequest.get_data() or b'{}')
+                body = json.loads((request.httprequest.get_data() or b'{}').decode('utf-8'))  # py3.5 (v11/12): bytes nepriima
                 create_csv = body.get('create_csv', u'')
                 bom_csv = body.get('bom_csv', u'')
                 wc_csv = body.get('wc_csv', u'')
@@ -331,7 +331,7 @@ class LaserCAMController(http.Controller):
         if not job:
             return self._json({'ok': False, 'error': 'not_found'})
         try:
-            body = json.loads(request.httprequest.get_data() or b'{}')
+            body = json.loads((request.httprequest.get_data() or b'{}').decode('utf-8'))  # py3.5 (v11/12): bytes nepriima
         except Exception as e:
             return self._json({'ok': False, 'error': u'bad json: %s' % e})
         wiz = env['lasercam.import.wizard'].sudo().create({})
