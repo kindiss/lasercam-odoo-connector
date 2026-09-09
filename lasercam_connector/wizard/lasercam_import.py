@@ -14,6 +14,7 @@ The ZIP is unpacked with Python `zipfile` (stdlib) — no extra installs.
 """
 import base64
 import io
+import json
 import re
 import zipfile
 
@@ -617,6 +618,7 @@ class LaserCAMImportWizard(models.TransientModel):
         bom_text = None
         wc_text = None
         create_text = None
+        products_json = None  # F5: nauji produktai (kaip create_products payload) ZIP'e
 
         # 1) ZIP (the main path — the LaserCAM "Odoo fixes" output).
         if self.zip_file:
@@ -627,6 +629,9 @@ class LaserCAMImportWizard(models.TransientModel):
                 raise UserError(u'Could not open the ZIP file (is it lasercam_fixes.zip?)')
             for name in zf.namelist():
                 low = name.lower()
+                if low.endswith('products.json'):
+                    products_json = self._to_text(zf.read(name))
+                    continue
                 if not low.endswith('.csv'):
                     continue
                 content = self._to_text(zf.read(name))
@@ -646,6 +651,13 @@ class LaserCAMImportWizard(models.TransientModel):
         if self.create_file:
             create_text = self._to_text(base64.b64decode(self.create_file))
 
+        # F5: NAUJI produktai pirmiau (kad jų BOM/WC jau būtų), tada esamų pataisymai.
+        if products_json:
+            try:
+                payload = json.loads(products_json)
+            except ValueError as e:
+                raise UserError(u'products.json: %s' % e)
+            self._process_products(payload, msgs)
         if create_text:
             self._process_create(create_text, msgs)
         if bom_text:
