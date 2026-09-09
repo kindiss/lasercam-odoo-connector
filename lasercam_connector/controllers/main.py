@@ -93,7 +93,7 @@ def _product_dxf(env, bom):
         # Ensure the code is in the file name — the app links DXF↔BOM by code.
         # We prefix ONLY with the product code (FIRST run of ≥3 digits, e.g.
         # "17154-LANE-3600" -> 17154) and only if not already there (avoid doubling).
-        runs = re.findall(r'\d{3,}', code or u'')
+        runs = re.findall(r'\d{3,}(?:-\d+)?', code or u'')
         short = runs[0] if runs else u''
         if short and short not in fname:
             fname = u'%s_%s' % (short, fname)
@@ -128,7 +128,7 @@ def _collect(env, boms):
         bom_code = u''  # product code = FIRST >=3-digit run, e.g. "17154-LANE-3600" -> 17154
         for _p in (_prod, _tmpl):
             if _p and getattr(_p, 'default_code', None):
-                _runs = re.findall(r'\d{3,}', _p.default_code)
+                _runs = re.findall(r'\d{3,}(?:-\d+)?', _p.default_code)
                 if _runs:
                     bom_code = _runs[0]
                 break
@@ -209,6 +209,17 @@ def _collect(env, boms):
     return bom_rows, wc_rows, dxf_files, codes
 
 
+def _remember_template(env, boms):
+    """Template "training" (F2): the last exported product becomes the copy()
+    source for the products the app creates (create_products)."""
+    for bom in boms:
+        tmpl = bom.product_tmpl_id if 'product_tmpl_id' in bom._fields else None
+        if tmpl:
+            env['ir.config_parameter'].sudo().set_param(
+                'lasercam.template_product_tmpl_id', u'%s' % tmpl.id)
+            return
+
+
 class LaserCAMController(http.Controller):
 
     # ── 1. File export (manual round-trip) ───────────────────────────────────
@@ -218,6 +229,7 @@ class LaserCAMController(http.Controller):
         bom_ids = [int(i) for i in ids.split(',') if i.strip().isdigit()]
         boms = env['mrp.bom'].browse(bom_ids).exists()
         bom_rows, wc_rows, dxf_files, codes = _collect(env, boms)
+        _remember_template(env, boms)
 
         # Pack both CSV into one ZIP (a single download from "Export").
         # STORE (no compression) — so the LaserCAM app's pure-TS reader can read it.
@@ -259,6 +271,7 @@ class LaserCAMController(http.Controller):
         if not job or not job.bom_id or not job.bom_id.exists():
             return self._json({'error': 'not_found'})
         bom_rows, wc_rows, dxf_files, codes = _collect(senv, job.bom_id)
+        _remember_template(senv, job.bom_id)
         dxf = None
         if dxf_files:
             name, raw = dxf_files[0]
@@ -305,3 +318,28 @@ class LaserCAMController(http.Controller):
 
         job.sudo().write({'state': 'done', 'result': u'\n'.join(msgs)})
         return self._json({'ok': True, 'messages': msgs})
+
+    @http.route('/lasercam/nest/products/<token>', type='http', auth='public',
+                methods=['POST'], csrf=False, cors='*')
+    def nest_products(self, token, **kw):
+        """create_products (F2): the app posts the products that are missing in
+        Odoo (JSON body — see wizard._process_products). Same one-time token as
+        the result endpoint. Response: {ok, created[], updated[], material_created,
+        errors[], messages[]}."""
+        env = request.env
+        job = env['lasercam.nest.job'].sudo().search([('token', '=', token)], limit=1)
+        if not job:
+            return self._json({'ok': False, 'error': 'not_found'})
+        try:
+            body = json.loads(request.httprequest.get_data() or b'{}')
+        except Exception as e:
+            return self._json({'ok': False, 'error': u'bad json: %s' % e})
+        wiz = env['lasercam.import.wizard'].sudo().create({})
+        msgs = []
+        try:
+            res = wiz._process_products(body, msgs)
+        except Exception as e:
+            return self._json({'ok': False, 'error': u'%s' % e, 'messages': msgs})
+        res['ok'] = True
+        res['messages'] = msgs
+        return self._json(res)
