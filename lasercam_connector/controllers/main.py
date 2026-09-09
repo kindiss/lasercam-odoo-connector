@@ -83,12 +83,23 @@ def _product_dxf(env, bom):
         # Ensure the code is in the file name — the app links DXF↔BOM by code.
         # We prefix ONLY with the product code (FIRST run of ≥3 digits, e.g.
         # "17154-LANE-3600" -> 17154) and only if not already there (avoid doubling).
-        runs = re.findall(r'\d{3,}', code or u'')
+        runs = re.findall(r'\d{3,}(?:-\d+)?', code or u'')
         short = runs[0] if runs else u''
         if short and short not in fname:
             fname = u'%s_%s' % (short, fname)
         return (fname, base64.b64decode(raw))
     return None
+
+
+def _remember_template(env, boms):
+    """Template "training" (F2): the last exported product becomes the copy()
+    source for the products the ZIP import creates (products.json)."""
+    for bom in boms:
+        tmpl = bom.product_tmpl_id if 'product_tmpl_id' in bom._fields else None
+        if tmpl:
+            env['ir.config_parameter'].sudo().set_param(
+                'lasercam.template_product_tmpl_id', u'%s' % tmpl.id)
+            return
 
 
 class LaserCAMController(http.Controller):
@@ -98,6 +109,7 @@ class LaserCAMController(http.Controller):
         env = request.env
         bom_ids = [int(i) for i in ids.split(',') if i.strip().isdigit()]
         boms = env['mrp.bom'].browse(bom_ids).exists()
+        _remember_template(env, boms)
 
         Bom = env['mrp.bom']
         Wc = env['mrp.workcenter']
@@ -124,7 +136,7 @@ class LaserCAMController(http.Controller):
             # "17154-LANE-3600-LOCK-..." -> 17154 (NOT 3600). The app links by this number.
             for _p in (_prod, _tmpl):
                 if _p and getattr(_p, 'default_code', None):
-                    _runs = re.findall(r'\d{3,}', _p.default_code)
+                    _runs = re.findall(r'\d{3,}(?:-\d+)?', _p.default_code)
                     if _runs:
                         bom_code = _runs[0]
                     break
