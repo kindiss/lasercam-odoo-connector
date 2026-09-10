@@ -498,6 +498,12 @@ class LaserCAMImportWizard(models.TransientModel):
         msgs.append(u'Work centers/operations updated: %s' % done)
 
     @_multi
+    def action_done(self):
+        u"""Close the dialog explicitly: after the act_url download Odoo 9/10 leave
+        the modal open when the button is only special="cancel"."""
+        return {'type': 'ir.actions.act_window_close'}
+
+    @_multi
     def action_import(self):
         self.ensure_one()
         msgs = []

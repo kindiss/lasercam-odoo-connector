@@ -14,7 +14,7 @@
           </div>
           <footer>
             <button name="action_download" string="Download ZIP" type="object" class="btn-primary"/>
-            <button string="Done" class="btn-default" special="cancel"/>
+            <button name="action_done" string="Done" type="object" class="btn-default"/>
           </footer>
         </form>
       </field>
@@ -43,7 +43,7 @@
           </group>
           <footer>
             <button name="action_import" string="Import" type="object" class="btn-primary"/>
-            <button string="Close" class="btn-default" special="cancel"/>
+            <button name="action_done" string="Close" type="object" class="btn-default"/>
           </footer>
         </form>
       </field>
