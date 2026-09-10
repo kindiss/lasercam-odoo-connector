@@ -25,3 +25,9 @@ class LaserCAMExportWizard(models.TransientModel):
             'url': '/lasercam/export?ids=%s' % ','.join(str(i) for i in ids),
             'target': 'self',
         }
+
+    @_multi
+    def action_done(self):
+        u"""Close the dialog explicitly: after the act_url download Odoo 9/10 leave
+        the modal open when the button is only special="cancel"."""
+        return {'type': 'ir.actions.act_window_close'}
