@@ -626,6 +626,7 @@ class LaserCAMImportWizard(models.TransientModel):
         wc_text = None
         create_text = None
         products_json = None  # F5: nauji produktai (kaip create_products payload) ZIP'e
+        dxf_in_zip = {}       # F5: <dxf_filename> -> bytes (DXF kaip atskiri failai ZIP'e)
 
         # 1) ZIP (the main path — the LaserCAM "Odoo fixes" output).
         if self.zip_file:
@@ -638,6 +639,9 @@ class LaserCAMImportWizard(models.TransientModel):
                 low = name.lower()
                 if low.endswith('products.json'):
                     products_json = self._to_text(zf.read(name))
+                    continue
+                if low.endswith('.dxf'):
+                    dxf_in_zip[name.rsplit('/', 1)[-1].lower()] = zf.read(name)
                     continue
                 if not low.endswith('.csv'):
                     continue
@@ -664,6 +668,12 @@ class LaserCAMImportWizard(models.TransientModel):
                 payload = json.loads(products_json)
             except ValueError as e:
                 raise UserError(u'products.json: %s' % e)
+            # DXF iš ZIP (kai JSON be base64): pagal dxf_filename.
+            for pr in payload.get('products') or []:
+                if not pr.get('dxf_base64') and pr.get('dxf_filename'):
+                    raw = dxf_in_zip.get((u'%s' % pr['dxf_filename']).rsplit('/', 1)[-1].lower())
+                    if raw:
+                        pr['dxf_base64'] = base64.b64encode(raw).decode('ascii')
             self._process_products(payload, msgs)
         if create_text:
             self._process_create(create_text, msgs)
