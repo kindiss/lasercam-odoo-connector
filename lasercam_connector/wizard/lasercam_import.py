@@ -227,8 +227,11 @@ class LaserCAMImportWizard(models.TransientModel):
         old_routing = False
         if has_routing:
             old_routing = bom.routing_id if bom.routing_id else False
-            if old_routing and 'workcenter_lines' in old_routing._fields and old_routing.workcenter_lines:
-                old_wc = old_routing.workcenter_lines[0].workcenter_id
+            # routing operations o2m: v9 `workcenter_lines`; v10-13 `operation_ids`
+            _ops = (old_routing.workcenter_lines if 'workcenter_lines' in old_routing._fields
+                    else old_routing.operation_ids) if old_routing else None
+            if _ops:
+                old_wc = _ops[0].workcenter_id
         elif 'operation_ids' in bom._fields and bom.operation_ids:
             old_wc = bom.operation_ids[0].workcenter_id
 
@@ -257,10 +260,11 @@ class LaserCAMImportWizard(models.TransientModel):
             # is already "Laser <code>" (clear out foreign ops); otherwise — NEW.
             routing_name = (u'Laser %s' % code) if code else (bom.display_name or u'LaserCAM')
             routing = None
-            if old_routing and (old_routing.name or u'').strip() == routing_name.strip() \
-                    and 'workcenter_lines' in old_routing._fields:
+            if old_routing and (old_routing.name or u'').strip() == routing_name.strip():
                 routing = old_routing
-                for o in [x for x in old_routing.workcenter_lines if x.workcenter_id.id != wc.id]:
+                _lines = (old_routing.workcenter_lines if 'workcenter_lines' in old_routing._fields
+                          else old_routing.operation_ids)
+                for o in [x for x in _lines if x.workcenter_id.id != wc.id]:
                     o.unlink()
             if routing is None:
                 routing = ROUTING.create({'name': routing_name})
