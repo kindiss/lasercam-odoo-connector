@@ -156,6 +156,17 @@ class LaserCAMController(http.Controller):
                 ops = bom.operation_ids
             op = ops[0] if ops else None
             op_name = op.name if op else u''
+            # BOM op-name column = canonical "Laser <code>" from the PRODUCT code (first
+            # >=3-digit run, like the app), even when the BOM has no routing yet — so the
+            # app links DXF<->BOM, treats it as an existing product and knows the template.
+            _bc = u''
+            for _p in (_prod, _tmpl):
+                if _p and getattr(_p, 'default_code', None):
+                    _r = re.findall(r'\d{3,}(?:-\d+)?', _p.default_code)
+                    if _r:
+                        _bc = _r[0]
+                    break
+            export_name = (u'Laser %s' % _bc) if _bc else op_name
             wc = op.workcenter_id if op else None
             # Time TARGET for the reverse import: v9 — workcenter; v10+ — operation.
             target = wc if (time_on_wc and wc) else op
@@ -175,7 +186,7 @@ class LaserCAMController(http.Controller):
 
             lines = bom.bom_line_ids
             if not lines:
-                bom_rows.append([bom_xid, u'', u'', u'', op_name])
+                bom_rows.append([bom_xid, u'', u'', u'', export_name])
                 continue
             first = True
             for line in lines:
@@ -184,7 +195,7 @@ class LaserCAMController(http.Controller):
                     u'%s' % line.id,
                     u'%s' % line.product_qty,
                     line.product_id.display_name or line.product_id.name or u'',
-                    op_name if first else u'',
+                    export_name if first else u'',
                 ])
                 first = False
 
