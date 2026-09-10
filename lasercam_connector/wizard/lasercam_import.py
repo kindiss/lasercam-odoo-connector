@@ -427,7 +427,14 @@ class LaserCAMImportWizard(models.TransientModel):
                 'type': 'binary', 'datas': b64}
         if 'datas_fname' in Att._fields:  # v9-12
             vals['datas_fname'] = fname
-        Att.create(vals)
+        att = Att.create(vals)
+        # Chatter: v9-12 shows only MESSAGE attachments (v13+ shows every record attachment)
+        # -> also post a note with the DXF so it is visible on the product form everywhere.
+        if hasattr(tmpl, 'message_post'):
+            try:
+                tmpl.message_post(body=u'DXF from LaserCAM', attachment_ids=[att.id])
+            except Exception:
+                pass
 
     def _process_products(self, payload, msgs):
         PT = self.env['product.template']
