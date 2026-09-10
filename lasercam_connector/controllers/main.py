@@ -153,7 +153,9 @@ class LaserCAMController(http.Controller):
                 dxf_names.add(name)
                 dxf_files.append((name, raw))
             if has_routing:
-                ops = bom.routing_id.workcenter_lines if bom.routing_id else Wc.browse()
+                # routing operations o2m: v9 `workcenter_lines`; v10-13 `operation_ids`
+                _rt = bom.routing_id
+                ops = (_rt.workcenter_lines if 'workcenter_lines' in _rt._fields else _rt.operation_ids) if _rt else Wc.browse()
             else:
                 ops = bom.operation_ids
             # Canonical laser name from the PRODUCT code (not the actual, possibly wrong,
