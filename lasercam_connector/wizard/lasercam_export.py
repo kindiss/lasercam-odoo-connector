@@ -23,7 +23,9 @@ class LaserCAMExportWizard(models.TransientModel):
         return {
             'type': 'ir.actions.act_url',
             'url': '/lasercam/export?ids=%s' % ','.join(str(i) for i in ids),
-            'target': 'self',
+            # 'new' (ne 'self'): Odoo 9/10 su target self nukreipia visa langa ir dialogas
+            # 'pakimba' (Done nebeveikia). Naujas skirtukas su attachment'u uzsidaro pats.
+            'target': 'new',
         }
 
     @_multi
