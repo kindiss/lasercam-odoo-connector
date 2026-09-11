@@ -2,7 +2,7 @@
   <div class="oe_row oe_spaced">
     <div class="oe_span12">
       <h2 class="oe_slogan" style="color:#875A7B;">LaserCAM Connector</h2>
-      <h3 class="oe_slogan" style="color:#666;">Round-trip your Bills of Materials through LaserCAM sheet nesting &mdash; and get real cutting times back</h3>
+      <h3 class="oe_slogan" style="color:#666;">Nest your Bills of Materials on real sheets, get calibrated cutting times back &mdash; and create new products straight from DXF</h3>
     </div>
   </div>
 </section>
@@ -11,12 +11,19 @@
   <div class="oe_row oe_spaced">
     <div class="oe_span12">
       <p class="oe_mt32" style="font-size:16px; text-align:justify;">
-        This module adds two actions to any <b>Bill of Materials</b>. Export the
-        BOM to <b>LaserCAM</b> (a free web-based sheet-metal nesting tool), lay out
-        your parts on the raw sheet, then import the result back into Odoo. Component
-        quantities (kg incl. cutting waste), parts-per-sheet and the sheet cutting
-        time are written straight into the BOM &mdash; no duplicates, no manual field
-        mapping.
+        This module links any <b>Bill of Materials</b> to <b>LaserCAM</b>, a web-based
+        nesting tool for flat parts cut from a sheet or a roll. Send one or many BOMs,
+        lay the parts out on the raw material, and write the result back: component
+        quantities (kg incl. cutting waste), parts-per-sheet and the cutting time land
+        directly in the BOM and its cutting operation &mdash; no duplicates, no manual
+        field mapping. Parts that do not exist in Odoo yet become new products with
+        their own BOM, operation and DXF attachment.
+      </p>
+      <p style="font-size:16px; text-align:justify;">
+        <b>Not only laser.</b> The same workflow fits plasma and waterjet cutting, CNC
+        routers (wood, plastics, composites), textile and leather cutters (garments,
+        upholstery, footwear), foam, glass, rubber gaskets and packaging &mdash; any
+        shop that turns a DXF and a sheet into parts.
       </p>
     </div>
   </div>
@@ -24,30 +31,105 @@
 
 <section class="oe_container">
   <div class="oe_row oe_spaced">
-    <div class="oe_span6">
-      <h3 class="oe_slogan" style="color:#875A7B;">Export to LaserCAM</h3>
-      <p style="font-size:15px;">
-        One click on <b>Action &rarr; Export to LaserCAM</b> downloads a single ZIP
-        containing everything the nester needs: BOM line ids and quantities, the
-        sheet component, the routing operation and the work-center capacity &amp;
-        cycle time. If a DXF is attached to the product, it travels inside the ZIP
-        too, so the part geometry loads automatically.
+    <div class="oe_span12">
+      <h3 class="oe_slogan" style="color:#875A7B;">Mixed parts on one sheet</h3>
+      <img src="mixed-nesting.gif" style="display:block; width:100%; max-width:1000px; margin:0 auto; border:1px solid #dee2e6; border-radius:6px;" alt="LaserCAM nesting 48 different parts on a 1250 x 2500 mm sheet, one by one"/>
+      <p style="text-align:center; color:#6c757d; font-size:13px; margin-top:8px;">48 parts from several BOMs placed one by one on a 1250&times;2500 mm sheet.</p>
+      <p style="font-size:15px; text-align:justify;">
+        Select several BOMs and send them together. Different products share the same
+        sheet: large parts go first, small ones fill the gaps around them, and parts
+        with matching edges interlock. A product marked <b>Fill the sheet</b> gets its
+        own full sheets; the rest are combined on shared sheets. <b>Optimize all</b>
+        runs every product through the layout variants in turn and keeps the best one
+        automatically.
       </p>
-    </div>
-    <div class="oe_span6">
-      <h3 class="oe_slogan" style="color:#875A7B;">Import from LaserCAM</h3>
-      <p style="font-size:15px;">
-        Drop the file LaserCAM produces back onto <b>Action &rarr; Import from
-        LaserCAM</b>. The module updates the component quantity, parts-per-sheet and
-        the sheet cutting time in place. When the BOM has no laser work center yet,
-        it creates one (<code>Laser &lt;code&gt;</code>) plus its routing operation,
-        inheriting the cost/hour of your previous work center.
+      <p style="font-size:15px; text-align:justify;">
+        Because a shared sheet has one cutting time and one weight, LaserCAM splits
+        them back per product in proportion to each part's cut length and area. Every
+        BOM receives its own true kg and minutes, even when it never had a sheet to
+        itself.
       </p>
     </div>
   </div>
 </section>
 
 <section class="oe_container oe_dark">
+  <div class="oe_row oe_spaced">
+    <div class="oe_span6">
+      <h3 class="oe_slogan" style="color:#875A7B;">Send directly to LaserCAM</h3>
+      <p style="font-size:15px;">
+        On Odoo <b>11.0 and newer</b>, <b>Action &rarr; LaserCAM &rarr; Send directly
+        to LaserCAM</b> opens the nesting tool in a new tab with the selected BOMs,
+        their work centers and the attached DXF files already loaded. Nothing to
+        download, nothing to upload. Each job uses a one-time token; the module never
+        stores your LaserCAM data.
+      </p>
+    </div>
+    <div class="oe_span6">
+      <h3 class="oe_slogan" style="color:#875A7B;">Save to Odoo</h3>
+      <p style="font-size:15px;">
+        When the layout is ready, <b>Save to Odoo</b> in LaserCAM writes the result
+        back through the same connection: component kg, parts-per-sheet and cutting
+        time per BOM. If a BOM has no laser work center yet, the module creates one
+        (<code>Laser &lt;code&gt;</code>) with its operation, copying the cost per
+        hour from your previous work center. Direct write-back is a LaserCAM Pro
+        feature; the ZIP round-trip below is free.
+      </p>
+    </div>
+  </div>
+</section>
+
+<section class="oe_container">
+  <div class="oe_row oe_spaced">
+    <div class="oe_span12">
+      <h3 class="oe_slogan" style="color:#875A7B;">New products from DXF <span style="display:inline-block; background:#e8f0fe; color:#0b57d0; font-size:12px; font-weight:500; letter-spacing:.06em; text-transform:uppercase; padding:2px 8px; border-radius:3px; vertical-align:middle; margin-left:8px;">New in 5.0</span></h3>
+      <p style="font-size:15px; text-align:justify;">
+        Drop DXF files that Odoo does not know yet next to the exported BOMs. LaserCAM
+        nests them together with the existing parts and, on save, the module creates
+        everything the new part needs in Manufacturing:
+      </p>
+      <div class="oe_row oe_spaced" style="max-width:900px; margin:16px auto 0;">
+        <div class="oe_span3"><div style="border-left:3px solid #875A7B; padding:2px 0 2px 12px; font-size:14px;"><b style="display:block; margin-bottom:2px;">Product</b>A copy of your template product (the last one you exported), with the new code and name taken from the DXF file name.</div></div>
+        <div class="oe_span3"><div style="border-left:3px solid #875A7B; padding:2px 0 2px 12px; font-size:14px;"><b style="display:block; margin-bottom:2px;">Bill of Materials</b>One line with the sheet material and the real kg per unit, cutting waste included.</div></div>
+        <div class="oe_span3"><div style="border-left:3px solid #875A7B; padding:2px 0 2px 12px; font-size:14px;"><b style="display:block; margin-bottom:2px;">Laser operation</b>Work center <code>Laser &lt;code&gt;</code> and its routing operation with the nested cycle time.</div></div>
+        <div class="oe_span3"><div style="border-left:3px solid #875A7B; padding:2px 0 2px 12px; font-size:14px;"><b style="display:block; margin-bottom:2px;">DXF attachment</b>The DXF is attached to the product and logged in the chatter, so the next export loads the geometry automatically.</div></div>
+      </div>
+      <p style="font-size:15px; text-align:justify;" class="oe_mt16">
+        A DXF that holds several different shapes can be split in LaserCAM into
+        separate products (<code>&lt;code&gt;-1</code>, <code>&lt;code&gt;-2</code>, &hellip;)
+        before saving. Product creation works through <b>Save to Odoo</b> and through
+        the fixes ZIP, so it is available on every supported version, 9.0 included.
+      </p>
+    </div>
+  </div>
+</section>
+
+<section class="oe_container oe_dark">
+  <div class="oe_row oe_spaced">
+    <div class="oe_span6">
+      <h3 class="oe_slogan" style="color:#875A7B;">Export to LaserCAM (ZIP)</h3>
+      <p style="font-size:15px;">
+        One click on <b>Action &rarr; LaserCAM &rarr; Export</b> downloads a single ZIP
+        containing everything the nester needs: BOM line ids and quantities, the
+        sheet component, the routing operation and the work-center capacity &amp;
+        cycle time. If a DXF is attached to the product, it travels inside the ZIP
+        too, so the part geometry loads automatically. Works on every version from 9.0.
+      </p>
+    </div>
+    <div class="oe_span6">
+      <h3 class="oe_slogan" style="color:#875A7B;">Import from LaserCAM (ZIP)</h3>
+      <p style="font-size:15px;">
+        Drop the <code>lasercam_fixes.zip</code> LaserCAM produces back onto
+        <b>Action &rarr; LaserCAM &rarr; Import result</b>. The module updates the
+        component quantity, parts-per-sheet and the sheet cutting time in place,
+        creates missing laser work centers and operations, and creates the new
+        products with their DXF files from the same ZIP.
+      </p>
+    </div>
+  </div>
+</section>
+
+<section class="oe_container">
   <div class="oe_row oe_spaced">
     <div class="oe_span12">
       <h3 class="oe_slogan" style="color:#875A7B;">How it works</h3>
@@ -55,7 +137,7 @@
   </div>
   <div class="oe_row oe_spaced">
     <div class="oe_span4">
-      <p class="oe_mt16" style="text-align:center;"><b>1. Export &amp; upload</b></p>
+      <p class="oe_mt16" style="text-align:center;"><b>1. Send or export</b></p>
       <img src="screenshot-1.png" class="oe_picture oe_screenshot" style="max-width:100%;"/>
     </div>
     <div class="oe_span4">
@@ -63,27 +145,29 @@
       <img src="screenshot-2.png" class="oe_picture oe_screenshot" style="max-width:100%;"/>
     </div>
     <div class="oe_span4">
-      <p class="oe_mt16" style="text-align:center;"><b>3. Download &amp; import back</b></p>
+      <p class="oe_mt16" style="text-align:center;"><b>3. Save to Odoo or import the ZIP</b></p>
       <img src="screenshot-3.png" class="oe_picture oe_screenshot" style="max-width:100%;"/>
     </div>
   </div>
 </section>
 
-<section class="oe_container">
+<section class="oe_container oe_dark">
   <div class="oe_row oe_spaced">
     <div class="oe_span12">
       <h3 class="oe_slogan" style="color:#875A7B;">Good to know</h3>
       <ul style="font-size:15px;">
-        <li>Works on Odoo <b>9.0 through 19.0</b> &mdash; a single code base that adapts to each version's Manufacturing model.</li>
+        <li><b>Any 2D cutting process:</b> laser, plasma, waterjet, CNC router, knife and textile cutters. The work center is named <code>Laser &lt;code&gt;</code> by default; rename it to match your machine.</li>
+        <li>Works on Odoo <b>9.0 through 19.0</b> &mdash; a single code base that adapts to each version's Manufacturing model. The direct connection needs 11.0 or newer; 9.0 and 10.0 use the ZIP round-trip.</li>
         <li>Enable <b>Work Orders</b> in <i>Manufacturing &rarr; Settings</i> if you want Odoo to use the imported cutting time in its scheduling and costing.</li>
-        <li>No external service is required at install time and no data leaves Odoo unless you choose to export a ZIP.</li>
-        <li>LaserCAM itself is a free web tool: <a href="https://laser.ucase.eu" target="_blank">laser.ucase.eu</a>.</li>
+        <li>Behind a reverse proxy, set <code>proxy_mode = True</code> and check that <i>web.base.url</i> starts with <code>https://</code> &mdash; the direct connection is opened from LaserCAM back to your Odoo.</li>
+        <li>No external service is required at install time and no data leaves Odoo unless you send a job or export a ZIP.</li>
+        <li>LaserCAM runs in the browser in 18 languages: <a href="https://laser.ucase.eu" target="_blank">laser.ucase.eu</a>. Nesting and the ZIP round-trip are free.</li>
       </ul>
     </div>
   </div>
 </section>
 
-<section class="oe_container oe_dark">
+<section class="oe_container">
   <div class="oe_row oe_spaced">
     <div class="oe_span12" style="text-align:center;">
       <h3 class="oe_slogan" style="color:#875A7B;">Support</h3>
