@@ -302,7 +302,9 @@ class LaserCAMImportWizard(models.TransientModel):
         if wc:
             wc.write(wc_vals)
         elif old_wc:
-            wc = old_wc.copy()
+            # v18+: do NOT copy the template's Product Capacities (they belong to the template
+            # product); _apply_wc_capacity adds this product's own line right after.
+            wc = old_wc.copy({'capacity_ids': False} if 'capacity_ids' in WC._fields else None)
             wc.write(wc_vals)
         else:
             wc = WC.create(wc_vals)
