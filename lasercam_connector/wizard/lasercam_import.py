@@ -356,17 +356,35 @@ class LaserCAMImportWizard(models.TransientModel):
                 op.write(op_vals)
             else:
                 op = ROP.create(op_vals)
+            # 5.1: a routing copied from the template may still carry the template's laser
+            # operation (e.g. "Lazeris 00692") — drop it; other operations (threading...) stay.
+            if old_wc and old_wc.id != wc.id:
+                for _o in self._op_lines(routing):
+                    if _o.id != op.id and _o.workcenter_id and _o.workcenter_id.id == old_wc.id:
+                        _o.unlink()
             if 'routing_id' in bom._fields:
                 bom.write({'routing_id': routing.id})
         else:
             # v14+: operation directly on the BOM. Add/update the laser op;
             # KEEP all other operations (do not remove them).
             op = ROP.search([('bom_id', '=', bom.id), ('workcenter_id', '=', wc.id)], limit=1)
+            if not op:
+                # 5.1: the BOM copied from the template (or an old BOM) has the laser operation
+                # on the OLD work center ("Lazeris 00692") — re-point it instead of adding a 2nd op.
+                for _o in bom.operation_ids:
+                    _wcn = (_o.workcenter_id.name if _o.workcenter_id else u'') or u''
+                    if (old_wc and _o.workcenter_id and _o.workcenter_id.id == old_wc.id) or re.search(u'la[sz]er', _wcn, re.I):
+                        op = _o
+                        break
             op_vals = _apply_time({'bom_id': bom.id, 'workcenter_id': wc.id, 'name': wc_name})
             if op:
                 op.write(op_vals)
             else:
                 op = ROP.create(op_vals)
+            if old_wc and old_wc.id != wc.id:
+                for _o in bom.operation_ids:
+                    if _o.id != op.id and _o.workcenter_id and _o.workcenter_id.id == old_wc.id:
+                        _o.unlink()
 
         # 5) BOM line kg (if provided)
         qty = get('product_qty').replace(',', '.')
@@ -618,7 +636,7 @@ class LaserCAMImportWizard(models.TransientModel):
     @_multi
     def action_nest(self):
         """Send directly: create a job for the selected BOM and open the app."""
-        ids = self._context.get('active_ids') or (
+        ids = self.env.context.get('active_ids') or (
             [self._context.get('active_id')] if self._context.get('active_id') else [])
         if not ids:
             raise UserError(u'Select a Bill of Materials first.')
