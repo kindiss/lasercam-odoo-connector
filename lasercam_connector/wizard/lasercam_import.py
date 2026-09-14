@@ -292,6 +292,11 @@ class LaserCAMImportWizard(models.TransientModel):
                         vals['time_mode'] = 'manual'
                 except ValueError:
                     pass
+            elif tc and 'hour_nbr' in ROP._fields:  # v9 — hours per cycle
+                try:
+                    vals['hour_nbr'] = float(tc)
+                except ValueError:
+                    pass
             return vals
 
         if has_routing:
