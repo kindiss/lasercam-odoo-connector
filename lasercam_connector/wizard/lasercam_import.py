@@ -188,6 +188,14 @@ class LaserCAMImportWizard(models.TransientModel):
                 vals[key] = val
         return vals
 
+    def _op_lines(self, routing):
+        u"""Routing operations o2m: v9-11 `workcenter_lines`, v12-13 `operation_ids`."""
+        if routing and 'workcenter_lines' in routing._fields:
+            return routing.workcenter_lines
+        if routing and 'operation_ids' in routing._fields:
+            return routing.operation_ids
+        return routing[:0] if routing else routing
+
     def _process_create(self, text, msgs):
         rows = _parse_csv(text)
         if not rows:
