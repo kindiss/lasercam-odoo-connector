@@ -156,13 +156,17 @@ class LaserCAMImportWizard(models.TransientModel):
         if 'resource_type' in f and rt:
             vals['resource_type'] = rt
         cal = get('calendar_name')
-        if cal:  # calendar field: v9-13 calendar_id / v14+ resource_calendar_id
-            for cfld in ('calendar_id', 'resource_calendar_id'):
-                if cfld in f:
-                    c = self.env['resource.calendar'].search([('name', '=', cal)], limit=1)
-                    if c:
-                        vals[cfld] = c.id
-                    break
+        for cfld in ('calendar_id', 'resource_calendar_id'):  # v9-13 calendar_id / v14+ resource_calendar_id
+            if cfld not in f:
+                continue
+            if cal:
+                c = self.env['resource.calendar'].search([('name', '=', cal)], limit=1)
+                if c:
+                    vals[cfld] = c.id
+            elif old_wc and cfld in old_wc._fields and old_wc[cfld]:
+                # 5.1: related field on v17+ (copy=False) -> copy() drops it; inherit explicitly.
+                vals[cfld] = old_wc[cfld].id
+            break
         # capacity → the right field: v9 capacity_per_cycle / v14+ default_capacity
         cap_raw = get('capacity_per_cycle').replace(',', '.')
         if cap_raw:
@@ -185,7 +189,8 @@ class LaserCAMImportWizard(models.TransientModel):
                 except ValueError:
                     val = None
             # Costs: app 0/empty → inherit from the old WC (so it is not 0).
-            if key in ('costs_hour', 'costs_cycle') and (val is None or val == 0.0) \
+            # (5.1) + time_efficiency: related on v17+ (copy=False) -> copy() resets it to 100.
+            if key in ('costs_hour', 'costs_cycle', 'time_efficiency') and (val is None or val == 0.0) \
                     and old_wc and key in old_wc._fields and old_wc[key]:
                 val = old_wc[key]
             if val is not None:
@@ -466,10 +471,25 @@ class LaserCAMImportWizard(models.TransientModel):
             # BOM (one per product) + sheet-material line (kg/unit incl. waste).
             bom = BOM.search([('product_tmpl_id', '=', new.id)], limit=1)
             if not bom:
-                bvals = {'product_tmpl_id': new.id, 'product_qty': 1.0}
-                if 'type' in BOM._fields:
-                    bvals['type'] = 'normal'
-                bom = BOM.create(bvals)
+                # 5.1: COPY the template's BOM (without its component lines) instead of
+                # an empty one — the copy carries the routing (v9-13) / operations (v14+),
+                # so _create_one finds the template's laser work center and copies it:
+                # cost/hour, efficiency, calendar, capacity all carry over (an empty BOM
+                # produced a bare "Laser <code>" work center with zero cost).
+                tmpl_bom = BOM.search([('product_tmpl_id', '=', tmpl.id)], limit=1) if tmpl else BOM.browse()
+                if tmpl_bom:
+                    dflt = {'product_tmpl_id': new.id, 'bom_line_ids': False}
+                    if 'product_id' in BOM._fields:
+                        dflt['product_id'] = False
+                    if 'code' in BOM._fields:
+                        dflt['code'] = False
+                    bom = tmpl_bom.copy(dflt)
+                    msgs.append(u'BOM %s: copied from template %s' % (code, tmpl.default_code or tmpl.name))
+                else:
+                    bvals = {'product_tmpl_id': new.id, 'product_qty': 1.0}
+                    if 'type' in BOM._fields:
+                        bvals['type'] = 'normal'
+                    bom = BOM.create(bvals)
             kg = pr.get('kg_per_unit')
             if mat and kg is not None:
                 line = None
