@@ -92,6 +92,14 @@ class LaserCAMImportWizard(models.TransientModel):
                 return f
         return None
 
+    def _op_lines(self, routing):
+        u"""Routing operations o2m: v9-11 `workcenter_lines`, v12-13 `operation_ids`."""
+        if routing and 'workcenter_lines' in routing._fields:
+            return routing.workcenter_lines
+        if routing and 'operation_ids' in routing._fields:
+            return routing.operation_ids
+        return routing[:0] if routing else routing
+
     def _relabel(self, old_name, code):
         u"""New name for a copied routing / work center: "Laser <code>" + whatever text
         followed the old code in the old name. E.g. "00641 Pjovimas" -> "Laser 00692
