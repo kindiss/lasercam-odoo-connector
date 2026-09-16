@@ -499,6 +499,42 @@ class LaserCAMImportWizard(models.TransientModel):
             except Exception:
                 pass
 
+    def _apply_reorder(self, new, tmpl, code, ro, msgs):
+        u"""Min/max reordering rule (stock.warehouse.orderpoint) for the new product.
+        Created ONLY when the template product has one: each template rule is copied
+        (same warehouse / location / route / trigger), min/max come from the app.
+        Idempotent — an existing rule for the same product+warehouse is updated."""
+        if 'stock.warehouse.orderpoint' not in self.env or not tmpl:
+            return
+        OP = self.env['stock.warehouse.orderpoint']
+        tmpl_variants = tmpl.product_variant_ids
+        tmpl_rules = OP.search([('product_id', 'in', tmpl_variants.ids)]) if tmpl_variants else OP.browse()
+        if not tmpl_rules:
+            msgs.append(u'%s: no reordering rule on template %s - none created' % (code, tmpl.default_code or tmpl.name))
+            return
+        try:
+            mn = float(ro.get('min') or 0)
+            mx = float(ro.get('max') or 0)
+        except (TypeError, ValueError):
+            mn = mx = 0.0
+        variant = new.product_variant_ids[:1]
+        if not variant:
+            return
+        n = 0
+        for rule in tmpl_rules:
+            dom = [('product_id', '=', variant.id)]
+            if 'warehouse_id' in OP._fields and rule.warehouse_id:
+                dom.append(('warehouse_id', '=', rule.warehouse_id.id))
+            existing = OP.search(dom, limit=1)
+            vals = {'product_min_qty': mn, 'product_max_qty': mx}
+            if existing:
+                existing.write(vals)
+            else:
+                vals['product_id'] = variant.id
+                rule.copy(vals)
+            n += 1
+        msgs.append(u'%s: reordering rule min %s / max %s (%d)' % (code, mn, mx, n))
+
     def _process_products(self, payload, msgs):
         PT = self.env['product.template']
         BOM = self.env['mrp.bom']
@@ -577,6 +613,10 @@ class LaserCAMImportWizard(models.TransientModel):
             b64 = pr.get('dxf_base64')
             if b64:
                 self._attach_dxf(new, pr.get('dxf_filename') or (u'%s.dxf' % code), b64)
+            # 5.2: reordering rule (min/max) — only when the template has one (copied).
+            ro = pr.get('reorder')
+            if isinstance(ro, dict):
+                self._apply_reorder(new, tmpl, code, ro, msgs)
         msgs.append(u'Products created: %s, updated: %s' % (len(res['created']), len(res['updated'])))
         return res
 
