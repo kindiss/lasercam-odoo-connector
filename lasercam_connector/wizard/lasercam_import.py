@@ -80,6 +80,9 @@ class LaserCAMImportWizard(models.TransientModel):
     create_file = fields.Binary('routing_create.csv (optional)')
     create_filename = fields.Char('Create file name')
     result = fields.Text('Result', readonly=True)
+    # 5.3: ticked -> the exported product opens in LaserCAM as a disabled TEMPLATE (reference
+    # for new products); unticked -> it opens active and its own BOM is recalculated.
+    is_template = fields.Boolean('Template only', default=False)
 
     def _to_text(self, raw):
         if raw[:3] == b'\xef\xbb\xbf':
@@ -133,6 +136,26 @@ class LaserCAMImportWizard(models.TransientModel):
             rec.write({'capacity': cap})
         else:
             Cap.create({'workcenter_id': wc.id, 'product_id': product.id, 'capacity': cap})
+
+    def _routing_name_keep(self, old_name, code):
+        u"""Routing name for an existing product: never rewrite the user's text.
+        Name already has this code -> unchanged. Another product's code in it -> only that
+        code is replaced. No code at all -> the code is put in front."""
+        old_name = old_name or u''
+        if re.search(u'(?<![0-9])%s(?![0-9])' % re.escape(code), old_name):
+            return old_name
+        runs = list(re.finditer(r'\d{3,}(?:-\d+)?', old_name))
+        if not runs:
+            return (u'%s %s' % (code, old_name)).strip()
+        # which run is the product code: one that looks like a code (leading zero or >= 5 digits),
+        # else the first run ("120 mm", "M10" style numbers come later in the text)
+        pick = runs[0]
+        for m in runs:
+            g = m.group(0)
+            if g.startswith(u'0') or len(g.split(u'-')[0]) >= 5:
+                pick = m
+                break
+        return old_name[:pick.start()] + code + old_name[pick.end():]
 
     def _process_bom(self, text, msgs):
         rows = _parse_csv(text)
@@ -333,8 +356,17 @@ class LaserCAMImportWizard(models.TransientModel):
             # operations), rename it, and assign the COPY to this BOM. The original
             # routing is left untouched (it may belong to another product).
             if old_routing:
-                routing_name = self._relabel(old_routing.name, code) if code else (old_routing.name or u'')
-                if (old_routing.name or u'').strip() == routing_name.strip():
+                old_rname = old_routing.name or u''
+                if not code:
+                    routing_name = old_rname
+                elif get('new_product') == u'1':
+                    # 5.3: a NEW product created from the template -> plain "Laser <code>"
+                    # (the template's description, e.g. "4 threads", is not carried over)
+                    routing_name = u'Laser %s' % code
+                else:
+                    # 5.3: an EXISTING product -> keep the user's routing text, only the code changes
+                    routing_name = self._routing_name_keep(old_rname, code)
+                if old_rname.strip() == routing_name.strip():
                     routing = old_routing            # already correct → reuse
                 else:
                     routing = old_routing.copy({'name': routing_name})
@@ -605,6 +637,7 @@ class LaserCAMImportWizard(models.TransientModel):
             minutes = pr.get('minutes_per_unit')
             per_sheet = pr.get('per_sheet') or pr.get('qty_nested') or 1
             row = {
+                'new_product': u'1' if code in res['created'] else u'',  # 5.3: routing naming rule
                 'bom_db_id': u'%s' % bom.id, 'code': code, 'wc_name': u'Laser %s' % code,
                 'capacity_per_cycle': u'%s' % per_sheet,
                 'time_cycle': (u'%s' % (float(minutes) * float(per_sheet) / 60.0)) if minutes is not None else u'',
@@ -668,33 +701,35 @@ class LaserCAMImportWizard(models.TransientModel):
         msgs.append(u'Work centers/operations updated: %s' % done)
 
     # ── Hub buttons: one "LaserCAM" dialog offers all three paths ─────────────
-    def _app_url(self, token):
+    def _app_url(self, token, tpl=True):
         base = self.env['ir.config_parameter'].sudo().get_param('web.base.url') or u''
         app = self.env['ir.config_parameter'].sudo().get_param('lasercam.app_url') \
             or u'https://laser.ucase.eu/app'
         sep = u'&' if u'?' in app else u'?'
-        return u'%s%ssrc=%s&job=%s' % (app, sep, base, token)
+        return u'%s%ssrc=%s&job=%s&tpl=%s' % (app, sep, base, token, u'1' if tpl else u'0')
 
     @_multi
     def action_nest(self):
         """Send directly: create a job for the selected BOM and open the app."""
-        ids = self.env.context.get('active_ids') or (
-            [self._context.get('active_id')] if self._context.get('active_id') else [])
+        ctx = self.env.context
+        ids = ctx.get('active_ids') or ([ctx.get('active_id')] if ctx.get('active_id') else [])
         if not ids:
             raise UserError(u'Select a Bill of Materials first.')
         bom = self.env['mrp.bom'].browse(ids[0]).exists()
         if not bom:
             raise UserError(u'Bill of Materials not found.')
         job = self.env['lasercam.nest.job'].create({'bom_id': bom.id})
-        return {'type': 'ir.actions.act_url', 'url': self._app_url(job.token), 'target': 'new'}
+        tpl = self[:1].is_template if self else False
+        return {'type': 'ir.actions.act_url', 'url': self._app_url(job.token, tpl), 'target': 'new'}
 
     @_multi
     def action_export(self):
         """Download the export ZIP (manual drag&drop path)."""
-        ids = self._context.get('active_ids', [])
+        ids = self.env.context.get('active_ids', [])
+        tpl = self[:1].is_template if self else False
         return {
             'type': 'ir.actions.act_url',
-            'url': u'/lasercam/export?ids=%s' % u','.join(str(i) for i in ids),
+            'url': u'/lasercam/export?ids=%s&tpl=%s' % (u','.join(str(i) for i in ids), u'1' if tpl else u'0'),
             'target': 'self',
         }
 

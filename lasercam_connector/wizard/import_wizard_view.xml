@@ -17,6 +17,14 @@
           the result the app produces below and press <b>Import</b>.
         </div>
 
+        <group>
+          <field name="is_template"/>
+        </group>
+        <div style="margin: -4px 4px 12px; color: #666; font-size: 12px; line-height: 1.4;">
+          Ticked: the product opens in LaserCAM as a disabled <b>template</b> for new products.
+          Unticked: it opens active and its own BOM is recalculated.
+        </div>
+
         <separator string="Export (download the BOM for LaserCAM)"/>
         <div style="display: flex; align-items: center; gap: 12px; margin: 6px 4px 14px;">
           <span style="min-width: 150px;">lasercam_export.zip</span>
