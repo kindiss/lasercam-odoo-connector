@@ -105,7 +105,7 @@ def _remember_template(env, boms):
 class LaserCAMController(http.Controller):
 
     @http.route('/lasercam/export', type='http', auth='user')
-    def lasercam_export(self, ids='', **kw):
+    def lasercam_export(self, ids='', tpl='1', **kw):
         env = request.env
         bom_ids = [int(i) for i in ids.split(',') if i.strip().isdigit()]
         boms = env['mrp.bom'].browse(bom_ids).exists()
@@ -223,6 +223,8 @@ class LaserCAMController(http.Controller):
         zf.writestr('mrp.workcenter.csv', _csv(wc_rows).encode('utf-8'))
         for name, raw in dxf_files:  # product DXF — the app picks them up automatically
             zf.writestr(name, raw)
+        # 5.3: template flag for the app (older apps ignore the file; no file = template)
+        zf.writestr('lasercam.json', (u'{"template": %s}' % (u'false' if tpl == '0' else u'true')).encode('utf-8'))
         zf.close()
         data = buf.getvalue()
 

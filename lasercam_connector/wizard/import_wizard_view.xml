@@ -12,6 +12,13 @@
             <a href="https://laser.ucase.eu/app" target="_blank">laser.ucase.eu/app</a>.
             The app will unpack the BOM and work center data itself.
           </div>
+          <group>
+            <field name="is_template"/>
+          </group>
+          <div style="margin: -4px 4px 12px; color: #666; font-size: 12px; line-height: 1.4;">
+            Ticked: the product opens in LaserCAM as a disabled <b>template</b> for new products.
+            Unticked: it opens active and its own BOM is recalculated.
+          </div>
           <footer>
             <button name="action_download" string="Download ZIP" type="object" class="btn-primary"/>
             <button name="action_done" string="Done" type="object" class="btn-default"/>

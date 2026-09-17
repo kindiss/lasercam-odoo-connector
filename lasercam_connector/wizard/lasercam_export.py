@@ -16,13 +16,16 @@ class LaserCAMExportWizard(models.TransientModel):
     _description = 'Export to LaserCAM'
 
     info = fields.Char(default='CSV for LaserCAM (laser.ucase.eu/app) — drag&drop it into the app.', readonly=True)
+    # 5.3: ticked -> the exported product opens in LaserCAM as a disabled TEMPLATE;
+    # unticked (default) -> it opens active and its own BOM is recalculated.
+    is_template = fields.Boolean('Template only', default=False)
 
     @_multi
     def action_download(self):
         ids = self._context.get('active_ids', [])
         return {
             'type': 'ir.actions.act_url',
-            'url': '/lasercam/export?ids=%s' % ','.join(str(i) for i in ids),
+            'url': '/lasercam/export?ids=%s&tpl=%s' % (','.join(str(i) for i in ids), '1' if self[:1].is_template else '0'),
             # 'new' (ne 'self'): Odoo 9/10 su target self nukreipia visa langa ir dialogas
             # 'pakimba' (Done nebeveikia). Naujas skirtukas su attachment'u uzsidaro pats.
             'target': 'new',

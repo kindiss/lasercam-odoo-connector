@@ -109,6 +109,26 @@ class LaserCAMImportWizard(models.TransientModel):
         suffix = old_name[runs[-1].end():] if runs else u''
         return (u'Laser %s%s' % (code, suffix)).strip()
 
+    def _routing_name_keep(self, old_name, code):
+        u"""Routing name for an existing product: never rewrite the user's text.
+        Name already has this code -> unchanged. Another product's code in it -> only that
+        code is replaced. No code at all -> the code is put in front."""
+        old_name = old_name or u''
+        if re.search(u'(?<![0-9])%s(?![0-9])' % re.escape(code), old_name):
+            return old_name
+        runs = list(re.finditer(r'\d{3,}(?:-\d+)?', old_name))
+        if not runs:
+            return (u'%s %s' % (code, old_name)).strip()
+        # which run is the product code: one that looks like a code (leading zero or >= 5 digits),
+        # else the first run ("120 mm", "M10" style numbers come later in the text)
+        pick = runs[0]
+        for m in runs:
+            g = m.group(0)
+            if g.startswith(u'0') or len(g.split(u'-')[0]) >= 5:
+                pick = m
+                break
+        return old_name[:pick.start()] + code + old_name[pick.end():]
+
     def _process_bom(self, text, msgs):
         rows = _parse_csv(text)
         if not rows:
@@ -307,8 +327,17 @@ class LaserCAMImportWizard(models.TransientModel):
             # operations), rename it, and assign the COPY to this BOM. The original
             # routing is left untouched (it may belong to another product).
             if old_routing:
-                routing_name = self._relabel(old_routing.name, code) if code else (old_routing.name or u'')
-                if (old_routing.name or u'').strip() == routing_name.strip():
+                old_rname = old_routing.name or u''
+                if not code:
+                    routing_name = old_rname
+                elif get('new_product') == u'1':
+                    # 5.3: a NEW product created from the template -> plain "Laser <code>"
+                    # (the template's description, e.g. "4 threads", is not carried over)
+                    routing_name = u'Laser %s' % code
+                else:
+                    # 5.3: an EXISTING product -> keep the user's routing text, only the code changes
+                    routing_name = self._routing_name_keep(old_rname, code)
+                if old_rname.strip() == routing_name.strip():
                     routing = old_routing            # already correct → reuse
                 else:
                     routing = old_routing.copy({'name': routing_name})
@@ -580,6 +609,7 @@ class LaserCAMImportWizard(models.TransientModel):
             minutes = pr.get('minutes_per_unit')
             per_sheet = pr.get('per_sheet') or pr.get('qty_nested') or 1
             row = {
+                'new_product': u'1' if code in res['created'] else u'',  # 5.3: routing naming rule
                 'bom_db_id': u'%s' % bom.id, 'code': code, 'wc_name': u'Laser %s' % code,
                 'capacity_per_cycle': u'%s' % per_sheet,
                 'time_cycle': (u'%s' % (float(minutes) * float(per_sheet) / 60.0)) if minutes is not None else u'',
