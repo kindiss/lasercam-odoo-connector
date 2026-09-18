@@ -107,6 +107,10 @@ class LaserCAMController(http.Controller):
     @http.route('/lasercam/export', type='http', auth='user')
     def lasercam_export(self, ids='', tpl='1', **kw):
         env = request.env
+        # 5.3: manufacturing users only (same group as the LaserCAM action / wizard)
+        if not env.user.has_group('mrp.group_mrp_user'):
+            return request.make_response(u'LaserCAM: manufacturing user rights required', status=403,
+                                         headers=[('Content-Type', 'text/plain; charset=utf-8')])
         bom_ids = [int(i) for i in ids.split(',') if i.strip().isdigit()]
         boms = env['mrp.bom'].browse(bom_ids).exists()
         _remember_template(env, boms)
