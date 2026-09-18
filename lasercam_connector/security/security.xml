@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 5.3: who may use LaserCAM. Manufacturing managers, Inventory managers and
+     Administrators get the group automatically (implied); an administrator can
+     add anybody else in Settings > Users > Other > LaserCAM. -->
+<data>
+
+  <record id="group_lasercam_user" model="res.groups">
+    <field name="name">LaserCAM</field>
+  </record>
+
+  <record id="mrp.group_mrp_manager" model="res.groups">
+    <field name="implied_ids" eval="[(4, ref('lasercam_connector.group_lasercam_user'))]"/>
+  </record>
+  <record id="stock.group_stock_manager" model="res.groups">
+    <field name="implied_ids" eval="[(4, ref('lasercam_connector.group_lasercam_user'))]"/>
+  </record>
+  <record id="base.group_system" model="res.groups">
+    <field name="implied_ids" eval="[(4, ref('lasercam_connector.group_lasercam_user'))]"/>
+  </record>
+
+</data>
