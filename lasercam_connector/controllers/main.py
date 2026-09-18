@@ -20,8 +20,10 @@ time ALWAYS normalized to hours (the LaserCAM format is stable). Py2/Py3 and
 openerp/odoo namespace compatibility via try/except.
 """
 import base64
+import datetime
 import io
 import json
+import uuid
 import re
 import zipfile
 
@@ -264,14 +266,46 @@ class LaserCAMController(http.Controller):
             headers=[('Content-Type', 'application/json')],
         )
 
+    JOB_TTL_DAYS = 1
+
+    def _job_expired(self, job):
+        cd = job.create_date
+        if not cd:
+            return False
+        if not isinstance(cd, datetime.datetime):  # v9-12: string
+            try:
+                cd = datetime.datetime.strptime(str(cd)[:19], '%Y-%m-%d %H:%M:%S')
+            except ValueError:
+                return False
+        return (datetime.datetime.utcnow() - cd) > datetime.timedelta(days=self.JOB_TTL_DAYS)
+
+    def _job_authorized(self, job, claim):
+        """Write-back guard (5.3): the job must be claimed and the caller must present the
+        claim key that the first GET handed out. Returns an error code or None."""
+        if self._job_expired(job):
+            return 'expired'
+        if not job.claim or not claim or claim != job.claim:
+            return 'not_authorized'
+        return None
+
     @http.route('/lasercam/nest/job/<token>', type='http', auth='public',
                 methods=['GET'], csrf=False, cors='*')
     def nest_job(self, token, **kw):
-        """The app fetches the job (BOM + WC + DXF) by its one-time token."""
+        """The app fetches the job (BOM + WC + DXF) by its token. The FIRST fetch claims
+        the job and returns a claim key; later fetches must repeat that key (same tab
+        reload) — a copied link opened elsewhere gets 'already_used'."""
         senv = request.env(user=SUPERUSER_ID)  # public route → superuser env for reads
         job = senv['lasercam.nest.job'].search([('token', '=', token)], limit=1)
         if not job or not job.bom_id or not job.bom_id.exists():
             return self._json({'error': 'not_found'})
+        if self._job_expired(job):
+            return self._json({'error': 'expired'})
+        claim = (kw.get('claim') or u'').strip()
+        if job.claim:
+            if claim != job.claim:
+                return self._json({'error': 'already_used'})
+        else:
+            job.write({'claim': uuid.uuid4().hex, 'claimed_at': datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')})
         bom_rows, wc_rows, dxf_files, codes = _collect(senv, job.bom_id)
         _remember_template(senv, job.bom_id)
         dxf = None
@@ -280,6 +314,7 @@ class LaserCAMController(http.Controller):
             dxf = {'name': name, 'b64': base64.b64encode(raw).decode('ascii')}
         return self._json({
             'token': token,
+            'claim': job.claim,
             'bom_csv': _csv(bom_rows),
             'wc_csv': _csv(wc_rows),
             'dxf': dxf,
@@ -297,14 +332,19 @@ class LaserCAMController(http.Controller):
         create_csv = kw.get('create_csv') or u''
         bom_csv = kw.get('bom_csv') or u''
         wc_csv = kw.get('wc_csv') or u''
+        claim = kw.get('claim') or u''
         if not (create_csv or bom_csv or wc_csv):  # raw JSON body fallback
             try:
                 body = json.loads((request.httprequest.get_data() or b'{}').decode('utf-8'))  # py3.5 (v11/12): bytes nepriima
                 create_csv = body.get('create_csv', u'')
                 bom_csv = body.get('bom_csv', u'')
                 wc_csv = body.get('wc_csv', u'')
+                claim = body.get('claim', u'') or claim
             except Exception:
                 pass
+        denied = self._job_authorized(job, claim)
+        if denied:
+            return self._json({'ok': False, 'error': denied})
 
         wiz = env['lasercam.import.wizard'].sudo().create({})
         msgs = []
@@ -336,6 +376,9 @@ class LaserCAMController(http.Controller):
             body = json.loads((request.httprequest.get_data() or b'{}').decode('utf-8'))  # py3.5 (v11/12): bytes nepriima
         except Exception as e:
             return self._json({'ok': False, 'error': u'bad json: %s' % e})
+        denied = self._job_authorized(job, (body.get('claim') or kw.get('claim') or u'') if isinstance(body, dict) else u'')
+        if denied:
+            return self._json({'ok': False, 'error': denied})
         wiz = env['lasercam.import.wizard'].sudo().create({})
         msgs = []
         try:
