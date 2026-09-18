@@ -47,6 +47,7 @@ imported cutting time (the work-center / operation time) in its calculations.
     ],
     'depends': ['mrp'],
     'data': [
+        'security/security.xml',
         'security/ir.model.access.csv',
         'views/actions.xml',
         'wizard/import_wizard_view.xml',
