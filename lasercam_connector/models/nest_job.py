@@ -23,3 +23,8 @@ class LasercamNestJob(models.Model):
     state = fields.Selection([('open', 'Open'), ('done', 'Done')],
                              default='open')
     result = fields.Text('Result', readonly=True)
+    # 5.3: the first GET of the job "claims" it — the claim key is handed to that browser
+    # tab only (never in the URL). Every write-back must present it; a copied link opened
+    # elsewhere gets 'already_used'. Jobs expire after 1 day.
+    claim = fields.Char('Claim key', copy=False, index=True)
+    claimed_at = fields.Datetime('Claimed at', copy=False)
