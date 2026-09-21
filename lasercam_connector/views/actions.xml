@@ -10,7 +10,10 @@
     <field name="res_model">lasercam.import.wizard</field>
     <field name="view_mode">form</field>
     <field name="target">new</field>
-    <field name="groups_id" eval="[(4, ref('lasercam_connector.group_lasercam_user'))]"/>
   </record>
+
+  <!-- 5.3: limit the LaserCAM action(s) to the LaserCAM group. Done in Python because the
+       field is groups_id on Odoo 9-18 and group_ids on Odoo 19; <function> also runs on upgrade. -->
+  <function model="lasercam.import.wizard" name="_lasercam_set_action_groups"/>
 
 </data>

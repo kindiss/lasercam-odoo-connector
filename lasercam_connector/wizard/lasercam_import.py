@@ -84,6 +84,22 @@ class LaserCAMImportWizard(models.TransientModel):
     # for new products); unticked -> it opens active and its own BOM is recalculated.
     is_template = fields.Boolean('Template only', default=False)
 
+    @api.model
+    def _lasercam_set_action_groups(self):
+        u"""Called from views/actions.xml (<function>) on install AND upgrade: the LaserCAM
+        action(s) are visible only to the LaserCAM group. Field name differs by version."""
+        grp = self.env.ref('lasercam_connector.group_lasercam_user', raise_if_not_found=False)
+        if not grp:
+            return True
+        for xid in ('lasercam_connector.action_lasercam_import', 'lasercam_connector.action_lasercam_export'):
+            act = self.env.ref(xid, raise_if_not_found=False)
+            if not act:
+                continue
+            fld = 'group_ids' if 'group_ids' in act._fields else ('groups_id' if 'groups_id' in act._fields else None)
+            if fld:
+                act.sudo().write({fld: [(4, grp.id)]})
+        return True
+
     def _to_text(self, raw):
         if raw[:3] == b'\xef\xbb\xbf':
             raw = raw[3:]
