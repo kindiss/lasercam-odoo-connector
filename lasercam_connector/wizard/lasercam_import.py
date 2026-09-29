@@ -488,7 +488,7 @@ class LaserCAMImportWizard(models.TransientModel):
             t = PT.search([('default_code', '=', code)], limit=1)
             if t:
                 return t
-        pid = self.env['ir.config_parameter'].sudo().get_param('lasercam.template_product_tmpl_id')
+        pid = self.env['ir.config_parameter'].sudo().get_str('lasercam.template_product_tmpl_id')   # Odoo 20: get_param -> get_str
         if pid and (u'%s' % pid).strip().isdigit():
             t = PT.browse(int(pid)).exists()
             if t:
@@ -531,11 +531,14 @@ class LaserCAMImportWizard(models.TransientModel):
         Att = self.env['ir.attachment']
         old = Att.search([('res_model', '=', 'product.template'), ('res_id', '=', tmpl.id),
                           ('name', '=', fname)], limit=1)
+        # Odoo 20: ir.attachment 'datas' (base64) removed -> 'raw' (bytes). Writing 'datas'
+        # would only log a warning and leave the attachment EMPTY.
+        raw = base64.b64decode(b64)
         if old:
-            old.write({'datas': b64})
+            old.write({'raw': raw})
             return
         vals = {'name': fname, 'res_model': 'product.template', 'res_id': tmpl.id,
-                'type': 'binary', 'datas': b64}
+                'type': 'binary', 'raw': raw}
         if 'datas_fname' in Att._fields:  # v9-12
             vals['datas_fname'] = fname
         att = Att.create(vals)
@@ -718,8 +721,8 @@ class LaserCAMImportWizard(models.TransientModel):
 
     # ── Hub buttons: one "LaserCAM" dialog offers all three paths ─────────────
     def _app_url(self, token, tpl=True):
-        base = self.env['ir.config_parameter'].sudo().get_param('web.base.url') or u''
-        app = self.env['ir.config_parameter'].sudo().get_param('lasercam.app_url') \
+        base = self.env['ir.config_parameter'].sudo().get_str('web.base.url') or u''
+        app = self.env['ir.config_parameter'].sudo().get_str('lasercam.app_url') \
             or u'https://laser.ucase.eu/app'
         sep = u'&' if u'?' in app else u'?'
         return u'%s%ssrc=%s&job=%s&tpl=%s' % (app, sep, base, token, u'1' if tpl else u'0')

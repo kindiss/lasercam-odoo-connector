@@ -1,0 +1,3 @@
+id,name,model_id,group_id/id,operation,domain
+access_lasercam_import_wizard,lasercam.import.wizard.user,lasercam.import.wizard,lasercam_connector.group_lasercam_user,crud,
+access_lasercam_nest_job,lasercam.nest.job.user,lasercam.nest.job,lasercam_connector.group_lasercam_user,crud,

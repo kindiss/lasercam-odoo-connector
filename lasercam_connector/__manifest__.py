@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 {
     'name': 'LaserCAM Connector',
-    'version': '19.0.5.3.0',
+    'version': '20.0.5.3.0',
     'category': 'Manufacturing',
     'summary': 'Export BOM data to LaserCAM nesting and import corrected quantities/times back',
     'description': """
@@ -48,7 +48,7 @@ imported cutting time (the work-center / operation time) in its calculations.
     'depends': ['mrp'],
     'data': [
         'security/security.xml',
-        'security/ir.model.access.csv',
+        'security/ir.access.csv',   # Odoo 20: ir.model.access -> ir.access
         'views/actions.xml',
         'wizard/import_wizard_view.xml',
     ],

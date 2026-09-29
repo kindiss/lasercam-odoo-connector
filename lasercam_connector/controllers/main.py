@@ -89,7 +89,7 @@ def _product_dxf(env, bom):
         fname = (att.datas_fname if has_fname else None) or att.name or u''
         if not fname.lower().endswith('.dxf'):
             continue
-        raw = att.datas
+        raw = att.raw   # Odoo 20: ir.attachment 'datas' (base64) removed -> 'raw' (bytes)
         if not raw:
             continue
         # Ensure the code is in the file name — the app links DXF↔BOM by code.
@@ -99,7 +99,7 @@ def _product_dxf(env, bom):
         short = runs[0] if runs else u''
         if short and short not in fname:
             fname = u'%s_%s' % (short, fname)
-        return (fname, base64.b64decode(raw))
+        return (fname, bytes(raw))
     return None
 
 
@@ -217,7 +217,7 @@ def _remember_template(env, boms):
     for bom in boms:
         tmpl = bom.product_tmpl_id if 'product_tmpl_id' in bom._fields else None
         if tmpl:
-            env['ir.config_parameter'].sudo().set_param(
+            env['ir.config_parameter'].sudo().set_str(   # Odoo 20: set_param -> set_str
                 'lasercam.template_product_tmpl_id', u'%s' % tmpl.id)
             return
 
