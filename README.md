@@ -3,7 +3,7 @@
 Round-trip your Odoo **Bills of Materials** through [LaserCAM](https://laser.ucase.eu)
 sheet-metal nesting — and get **real cutting times** and nested quantities back.
 
-One code base, **works on Odoo 9.0 through 19.0**.
+One code base, **works on Odoo 9.0 through 20.0**.
 
 ## What it does
 
@@ -26,7 +26,7 @@ A single module that adapts at runtime to each version's Manufacturing model:
 | Odoo | Manufacturing model | Status |
 |------|---------------------|--------|
 | 9.0 – 13.0 | `mrp.routing` + `bom.routing_id` | ✅ |
-| 14.0 – 19.0 | operations on `bom.operation_ids` | ✅ |
+| 14.0 – 20.0 | operations on `bom.operation_ids` | ✅ |
 
 ## Install
 
