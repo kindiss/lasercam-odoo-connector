@@ -57,10 +57,12 @@ def _xmlid(rec):
     return rec.export_data(['id'])['datas'][0][0]
 
 
-def _product_dxf(env, bom):
+def _product_dxf(env, bom, notes=None):
     """Newest .dxf attachment for the BOM product → (file_name, bytes) or None.
     We look on both product.template and product.product (v9–19). The DXF app
-    picks it up straight from the export ZIP — no manual upload needed."""
+    picks it up straight from the export ZIP — no manual upload needed.
+    ``notes`` (list) collects WHY no DXF was taken — shipped in the ZIP as
+    lasercam_notes.txt so the user sees it instead of a silent ZIP without parts."""
     Att = env['ir.attachment']
     tmpl = bom.product_tmpl_id if 'product_tmpl_id' in bom._fields else None
     prod = bom.product_id if 'product_id' in bom._fields else None
@@ -73,12 +75,20 @@ def _product_dxf(env, bom):
         if p and getattr(p, 'default_code', None):
             code = p.default_code
             break
-    for att in Att.search(domain, order='id desc'):
+    atts = Att.search(domain, order='id desc')
+    label = u'%s (template %s / variant %s)' % (code or (tmpl.display_name if tmpl else u'?'), tmpl.id if tmpl else 0, prod.id if prod else 0)
+    if notes is not None and not atts:
+        notes.append(u'%s: no attachments on the product (attach the DXF to the product form)' % label)
+    for att in atts:
         fname = (att.datas_fname if has_fname else None) or att.name or u''
         if not fname.lower().endswith('.dxf'):
+            if notes is not None:
+                notes.append(u'%s: attachment "%s" skipped (name does not end with .dxf)' % (label, fname))
             continue
         raw = att.datas
         if not raw:
+            if notes is not None:
+                notes.append(u'%s: attachment "%s" has no file content (filestore missing?) - re-upload the DXF' % (label, fname))
             continue
         # Ensure the code is in the file name — the app links DXF↔BOM by code.
         # We prefix ONLY with the product code (FIRST run of ≥3 digits, e.g.
@@ -107,10 +117,18 @@ class LaserCAMController(http.Controller):
     @http.route('/lasercam/export', type='http', auth='user')
     def lasercam_export(self, ids='', tpl='1', **kw):
         env = request.env
-        # 5.3: manufacturing users only (same group as the LaserCAM action / wizard)
-        if not env.user.has_group('lasercam_connector.group_lasercam_user'):
-            return request.make_response(u'LaserCAM: access group required (Settings > Users > LaserCAM)', status=403,
+        # 5.3: manufacturing users only (same group as the LaserCAM action / wizard).
+        # Group missing = module not upgraded yet -> fall back to the Manufacturing groups.
+        grp = env.ref('lasercam_connector.group_lasercam_user', raise_if_not_found=False)
+        if grp:
+            allowed = env.user.has_group('lasercam_connector.group_lasercam_user')
+        else:
+            allowed = env.user.has_group('mrp.group_mrp_manager') or env.user.has_group('mrp.group_mrp_user')
+        if not allowed:
+            resp = request.make_response(u'LaserCAM: access group required (Settings > Users > LaserCAM)',
                                          headers=[('Content-Type', 'text/plain; charset=utf-8')])
+            resp.status_code = 403   # Odoo 9: make_response() has no status= argument
+            return resp
         bom_ids = [int(i) for i in ids.split(',') if i.strip().isdigit()]
         boms = env['mrp.bom'].browse(bom_ids).exists()
         _remember_template(env, boms)
@@ -129,6 +147,7 @@ class LaserCAMController(http.Controller):
         wc_seen = {}    # target_xid -> [name, cap, time_h]
         wc_order = []   # keeps order, without duplicates
         dxf_files = []  # [(name, bytes)] — product DXF (attachment) into the ZIP
+        notes = []      # why a product has no DXF (shown by the app)
         dxf_names = set()
         codes = []      # product codes → for the ZIP file name
 
@@ -146,7 +165,7 @@ class LaserCAMController(http.Controller):
                     break
             if bom_code and bom_code not in codes:
                 codes.append(bom_code)
-            dxf = _product_dxf(env, bom)
+            dxf = _product_dxf(env, bom, notes)
             if dxf:
                 name, raw = dxf
                 base, i = name, 1
@@ -229,6 +248,8 @@ class LaserCAMController(http.Controller):
             zf.writestr(name, raw)
         # 5.3: template flag for the app (older apps ignore the file; no file = template)
         zf.writestr('lasercam.json', (u'{"template": %s}' % (u'false' if tpl == '0' else u'true')).encode('utf-8'))
+        if notes:  # why some products have no DXF - the app shows these lines
+            zf.writestr('lasercam_notes.txt', (u'%s' % chr(10)).join(notes).encode('utf-8'))
         zf.close()
         data = buf.getvalue()
 
