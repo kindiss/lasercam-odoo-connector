@@ -310,8 +310,15 @@ class LaserCAMImportWizard(models.TransientModel):
         # the app's corrected values. The old (shared) WC stays untouched.
         wc = WC.search([('name', '=', wc_name)], limit=1)
         wc_vals = self._wc_vals(WC, get, wc_name, code, old_wc)
+        # wc_mode (routing_create.csv, app choice when the BOM's laser WC has another
+        # number): 'rename' = rename that old WC instead of copying it (no orphan WC);
+        # '' / 'copy' = copy (default, the old WC stays for other products).
+        wc_mode = (get('wc_mode') or u'').strip().lower()
         if wc:
             wc.write(wc_vals)
+        elif old_wc and wc_mode == 'rename':
+            old_wc.write(wc_vals)
+            wc = old_wc
         elif old_wc:
             # v18+: do NOT copy the template's Product Capacities (they belong to the template
             # product); _apply_wc_capacity adds this product's own line right after.
