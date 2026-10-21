@@ -287,7 +287,18 @@ class LaserCAMImportWizard(models.TransientModel):
         # 1) find-or-create WC "Laser <code>"; cost inherited from the old one
         wc = WC.search([('name', '=', wc_name)], limit=1)
         wc_vals = self._wc_vals(WC, get, wc_name, code, old_wc)
+        # wc_mode (routing_create.csv, app choice when the BOM's laser WC has another
+        # number): 'rename' = rename that old WC instead of copying it (no orphan WC);
+        # '' / 'copy' = copy (default, the old WC stays for other products).
+        wc_mode = (get('wc_mode') or u'').strip().lower()
         if wc:
+            wc.write(wc_vals)
+        elif old_wc and wc_mode == 'rename':
+            old_wc.write(wc_vals)
+            wc = old_wc
+        elif old_wc:
+            # copy the BOM's old (wrongly-named) laser WC so ALL its parameters carry over
+            wc = old_wc.copy({'capacity_ids': False} if 'capacity_ids' in WC._fields else None)
             wc.write(wc_vals)
         else:
             wc = WC.create(wc_vals)
