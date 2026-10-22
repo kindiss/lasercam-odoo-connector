@@ -105,6 +105,13 @@ class LaserCAMImportWizard(models.TransientModel):
             raw = raw[3:]
         return raw.decode('utf-8')
 
+    def _bin(self, value):
+        u"""Raw bytes of a fields.Binary value. Odoo 20: the field holds a BinaryValue
+        (raw bytes, `.content`); Odoo 9-19: a base64 string/bytes."""
+        if hasattr(value, 'content'):
+            return bytes(value.content)
+        return base64.b64decode(value)
+
     def _cap_field(self, wc):
         for f in ('capacity_per_cycle', 'default_capacity', 'capacity'):
             if f in wc._fields:
@@ -771,7 +778,7 @@ class LaserCAMImportWizard(models.TransientModel):
 
         # 1) ZIP (the main path — the LaserCAM "Odoo fixes" output).
         if self.zip_file:
-            raw = base64.b64decode(self.zip_file)
+            raw = self._bin(self.zip_file)
             try:
                 zf = zipfile.ZipFile(io.BytesIO(raw))
             except Exception:
@@ -797,11 +804,11 @@ class LaserCAMImportWizard(models.TransientModel):
 
         # 2) Individual CSV (manual fallback, if someone unpacked the ZIP).
         if self.bom_file:
-            bom_text = self._to_text(base64.b64decode(self.bom_file))
+            bom_text = self._to_text(self._bin(self.bom_file))
         if self.wc_file:
-            wc_text = self._to_text(base64.b64decode(self.wc_file))
+            wc_text = self._to_text(self._bin(self.wc_file))
         if self.create_file:
-            create_text = self._to_text(base64.b64decode(self.create_file))
+            create_text = self._to_text(self._bin(self.create_file))
 
         # F5: NAUJI produktai pirmiau (kad jų BOM/WC jau būtų), tada esamų pataisymai.
         if products_json:
