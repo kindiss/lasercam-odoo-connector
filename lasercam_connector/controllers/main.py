@@ -58,7 +58,10 @@ def _xmlid(rec):
 
 
 def _product_dxf(env, bom, notes=None):
-    """Newest .dxf attachment for the BOM product → (file_name, bytes) or None.
+    """Product geometry for the BOM → list of (file_name, bytes): the newest .dxf
+    attachment and/or the newest STEP (.step/.stp). The app unfolds a STEP (flat
+    pattern, bends, threads - LaserCAM Pro); when a product has both, the app asks
+    which one to nest from.
     We look on both product.template and product.product (v9–19). The DXF app
     picks it up straight from the export ZIP — no manual upload needed.
     ``notes`` (list) collects WHY no DXF was taken — shipped in the ZIP as
@@ -78,17 +81,23 @@ def _product_dxf(env, bom, notes=None):
     atts = Att.search(domain, order='id desc')
     label = u'%s (template %s / variant %s)' % (code or (tmpl.display_name if tmpl else u'?'), tmpl.id if tmpl else 0, prod.id if prod else 0)
     if notes is not None and not atts:
-        notes.append(u'%s: no attachments on the product (attach the DXF to the product form)' % label)
+        notes.append(u'%s: no attachments on the product (attach the DXF or STEP to the product form)' % label)
+    found = {}  # 'dxf' / 'step' -> (file_name, bytes), the newest of each
     for att in atts:
         fname = (att.datas_fname if has_fname else None) or att.name or u''
-        if not fname.lower().endswith('.dxf'):
+        low = fname.lower()
+        is_step = low.endswith('.step') or low.endswith('.stp')
+        if not (low.endswith('.dxf') or is_step):
             if notes is not None:
-                notes.append(u'%s: attachment "%s" skipped (name does not end with .dxf)' % (label, fname))
+                notes.append(u'%s: attachment "%s" skipped (name does not end with .dxf, .step or .stp)' % (label, fname))
             continue
+        kind = 'step' if is_step else 'dxf'
+        if kind in found:
+            continue  # only the newest DXF and the newest STEP
         raw = att.datas
         if not raw:
             if notes is not None:
-                notes.append(u'%s: attachment "%s" has no file content (filestore missing?) - re-upload the DXF' % (label, fname))
+                notes.append(u'%s: attachment "%s" has no file content (filestore missing?) - re-upload the file' % (label, fname))
             continue
         # Ensure the code is in the file name — the app links DXF↔BOM by code.
         # We prefix ONLY with the product code (FIRST run of ≥3 digits, e.g.
@@ -97,8 +106,10 @@ def _product_dxf(env, bom, notes=None):
         short = runs[0] if runs else u''
         if short and short not in fname:
             fname = u'%s_%s' % (short, fname)
-        return (fname, base64.b64decode(raw))
-    return None
+        found[kind] = (fname, base64.b64decode(raw))
+        if len(found) == 2:
+            break
+    return [found[k] for k in ('dxf', 'step') if k in found]
 
 
 def _remember_template(env, boms):
@@ -165,9 +176,7 @@ class LaserCAMController(http.Controller):
                     break
             if bom_code and bom_code not in codes:
                 codes.append(bom_code)
-            dxf = _product_dxf(env, bom, notes)
-            if dxf:
-                name, raw = dxf
+            for name, raw in _product_dxf(env, bom, notes):  # DXF and/or STEP (both -> the app asks)
                 base, i = name, 1
                 while name in dxf_names:  # avoid duplicate names in the ZIP
                     dot = base.rfind('.')
