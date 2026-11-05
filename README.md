@@ -12,7 +12,9 @@ Adds two actions to any Bill of Materials:
 - **Export to LaserCAM** — downloads a single ZIP with everything the nester needs
   (BOM line ids/quantities, the sheet component, the routing operation, work-center
   capacity & cycle time). If a DXF is attached to the product, it travels inside the
-  ZIP too, so the part geometry loads automatically.
+  ZIP too, so the part geometry loads automatically. A STEP model attached to the product is sent
+  too: LaserCAM unfolds it (flat pattern, bends, threads - Pro plan) and, when
+  a product has both, asks which one to nest from.
 - **Import from LaserCAM** — upload the file LaserCAM produces; the module updates the
   component quantity (kg incl. cutting waste), parts-per-sheet and the sheet cutting
   time **in place**. When the BOM has no laser work center yet, it creates one
