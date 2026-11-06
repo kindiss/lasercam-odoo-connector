@@ -69,49 +69,82 @@ def _xmlid(rec):
     return rec.export_data(['id'])['datas'][0][0]
 
 
-def _product_dxf(env, bom):
-    """Product geometry for the BOM → list of (file_name, bytes): the newest .dxf
-    attachment and/or the newest STEP (.step/.stp). The app unfolds a STEP (flat
-    pattern, bends, threads - LaserCAM Pro); when a product has both, the app asks
-    which one to nest from.
-    We look on both product.template and product.product (v9–19). The DXF app
-    picks it up straight from the export ZIP — no manual upload needed."""
+def _bom_files(env, bom, notes=None):
+    """Files for the BOM -> list of (file_name, bytes, source), source = 'product' | 'bom'.
+    From EACH source the newest .dxf, the newest STEP (.step/.stp) and the drawing PDF
+    (the newest whose name holds the product code, else the newest PDF). The app keeps
+    one whole source per part (its "files on the product / on the BOM" setting, falling
+    back to the other source when the chosen one has no DXF/STEP) and asks DXF-or-STEP
+    when both are there. Product = product.template + product.product (v9-20).
+    ``notes`` (list) collects WHY a product has no geometry - shipped in the export so
+    the user sees it instead of a silent ZIP without parts."""
     Att = env['ir.attachment']
     tmpl = bom.product_tmpl_id if 'product_tmpl_id' in bom._fields else None
     prod = bom.product_id if 'product_id' in bom._fields else None
-    domain = ['|',
-              '&', ('res_model', '=', 'product.template'), ('res_id', '=', tmpl.id if tmpl else 0),
-              '&', ('res_model', '=', 'product.product'), ('res_id', '=', prod.id if prod else 0)]
-    has_fname = 'datas_fname' in Att._fields  # v9–12; removed in v13+
+    has_fname = 'datas_fname' in Att._fields  # v9-12; removed in v13+
     code = u''
     for p in (prod, tmpl):
         if p and getattr(p, 'default_code', None):
             code = p.default_code
             break
-    found = {}  # 'dxf' / 'step' -> (file_name, bytes), the newest of each
-    for att in Att.search(domain, order='id desc'):
-        fname = (att.datas_fname if has_fname else None) or att.name or u''
-        low = fname.lower()
-        is_step = low.endswith('.step') or low.endswith('.stp')
-        if not (low.endswith('.dxf') or is_step):
-            continue
-        kind = 'step' if is_step else 'dxf'
-        if kind in found:
-            continue  # only the newest DXF and the newest STEP
-        raw = att.datas
-        if not raw:
-            continue
-        # Ensure the code is in the file name — the app links DXF↔BOM by code.
-        # We prefix ONLY with the product code (FIRST run of ≥3 digits, e.g.
-        # "17154-LANE-3600" -> 17154) and only if not already there (avoid doubling).
-        runs = re.findall(r'\d{3,}(?:-\d+)?', code or u'')
-        short = runs[0] if runs else u''
-        if short and short not in fname:
-            fname = u'%s_%s' % (short, fname)
-        found[kind] = (fname, base64.b64decode(raw))
-        if len(found) == 2:
-            break
-    return [found[k] for k in ('dxf', 'step') if k in found]
+    runs = re.findall(r'\d{3,}(?:-\d+)?', code or u'')
+    short = runs[0] if runs else u''
+    label = u'%s (template %s / variant %s)' % (code or (tmpl.display_name if tmpl else u'?'), tmpl.id if tmpl else 0, prod.id if prod else 0)
+    sources = [
+        ('product', ['|',
+                     '&', ('res_model', '=', 'product.template'), ('res_id', '=', tmpl.id if tmpl else 0),
+                     '&', ('res_model', '=', 'product.product'), ('res_id', '=', prod.id if prod else 0)]),
+        ('bom', [('res_model', '=', 'mrp.bom'), ('res_id', '=', bom.id)]),
+    ]
+    out = []
+    any_geom = False
+    for source, domain in sources:
+        found = {}  # 'dxf' / 'step' / 'pdf' -> (file_name, att); the newest of each (PDF: code in the name wins)
+        for att in Att.search(domain, order='id desc'):
+            fname = (att.datas_fname if has_fname else None) or att.name or u''
+            low = fname.lower()
+            if low.endswith('.dxf'):
+                kind = 'dxf'
+            elif low.endswith('.step') or low.endswith('.stp'):
+                kind = 'step'
+            elif low.endswith('.pdf'):
+                kind = 'pdf'
+            else:
+                continue
+            if kind in found:
+                if kind == 'pdf' and short and short in fname and short not in found[kind][0]:
+                    found[kind] = (fname, att)  # the drawing (code in the name) beats a newer certificate / quote
+                continue
+            found[kind] = (fname, att)
+        for kind in ('dxf', 'step', 'pdf'):
+            if kind not in found:
+                continue
+            fname, att = found[kind]
+            # Odoo 13+: 'raw' (bytes); Odoo 9-12: only 'datas' (base64). Odoo 20 removed 'datas'.
+            if 'raw' in Att._fields:
+                raw = att.raw
+            else:
+                raw = base64.b64decode(att.datas) if att.datas else b''
+            if not raw:
+                if notes is not None:
+                    notes.append(u'%s: attachment "%s" has no file content (filestore missing?) - re-upload the file' % (label, fname))
+                continue
+            # Ensure the code is in the file name - the app links files <-> BOM by code (FIRST run of >=3 digits,
+            # e.g. "17154-LANE-3600" -> 17154) and only if not already there (avoid doubling).
+            if short and short not in fname:
+                fname = u'%s_%s' % (short, fname)
+            if kind != 'pdf':
+                any_geom = True
+            out.append((fname, bytes(raw), source))
+    if notes is not None and not any_geom:
+        notes.append(u'%s: no DXF or STEP attached to the product or its bill of materials (attach the file to the product form)' % label)
+    return out
+
+
+def _lasercam_json(template, files):
+    """``lasercam.json`` of the export ZIP: template flag + the source of every file (by its ZIP name).
+    Older apps read only ``template``; a missing ``files`` entry means 'product'."""
+    return json.dumps({'template': bool(template), 'files': dict((n, s) for n, b, s in files)}, sort_keys=True)
 
 
 def _collect(env, boms):
@@ -130,7 +163,7 @@ def _collect(env, boms):
     bom_rows = [BOM_HEADER]
     wc_seen = {}    # target_xid -> [name, cap, time_h]
     wc_order = []   # keeps order, without duplicates
-    dxf_files = []  # [(name, bytes)] — product DXF (attachment)
+    dxf_files = []  # [(name, bytes, source)] — product DXF (attachment)
     dxf_names = set()
     codes = []      # product codes → for the ZIP file name
 
@@ -147,14 +180,14 @@ def _collect(env, boms):
                 break
         if bom_code and bom_code not in codes:
             codes.append(bom_code)
-        for name, raw in _product_dxf(env, bom):  # DXF and/or STEP (both -> the app asks)
+        for name, raw, source in _bom_files(env, bom):  # DXF / STEP / PDF from the product and the BOM
             base, i = name, 1
             while name in dxf_names:  # avoid duplicate names in the ZIP
                 dot = base.rfind('.')
                 name = (u'%s_%d%s' % (base[:dot], i, base[dot:])) if dot > 0 else u'%s_%d' % (base, i)
                 i += 1
             dxf_names.add(name)
-            dxf_files.append((name, raw))
+            dxf_files.append((name, raw, source))
         if has_routing:
             rt = bom.routing_id
             if rt:
@@ -252,10 +285,10 @@ class LaserCAMController(http.Controller):
         zf = zipfile.ZipFile(buf, 'w', zipfile.ZIP_STORED)
         zf.writestr('mrp.bom.csv', _csv(bom_rows).encode('utf-8'))
         zf.writestr('mrp.workcenter.csv', _csv(wc_rows).encode('utf-8'))
-        for name, raw in dxf_files:  # product DXF — the app picks them up automatically
+        for name, raw, source in dxf_files:  # product DXF — the app picks them up automatically
             zf.writestr(name, raw)
         # 5.3: template flag for the app (older apps ignore the file; no file = template)
-        zf.writestr('lasercam.json', (u'{"template": %s}' % (u'false' if tpl == '0' else u'true')).encode('utf-8'))
+        zf.writestr('lasercam.json', _lasercam_json(tpl != '0', dxf_files).encode('utf-8'))
         zf.close()
         data = buf.getvalue()
 
@@ -321,12 +354,13 @@ class LaserCAMController(http.Controller):
             job.write({'claim': uuid.uuid4().hex, 'claimed_at': datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')})
         bom_rows, wc_rows, dxf_files, codes = _collect(senv, job.bom_id)
         _remember_template(senv, job.bom_id)
-        dxf = None
-        if dxf_files:
-            name, raw = dxf_files[0]
-            dxf = {'name': name, 'b64': base64.b64encode(raw).decode('ascii')}
+        dxf = None  # legacy single file (older apps): the first DXF / STEP, never the PDF
+        for name, raw, source in dxf_files:
+            if not name.lower().endswith('.pdf'):
+                dxf = {'name': name, 'b64': base64.b64encode(raw).decode('ascii')}
+                break
         # all files (DXF + STEP of the same product -> the app asks which one to nest from)
-        dxfs = [{'name': n, 'b64': base64.b64encode(r).decode('ascii')} for n, r in dxf_files]
+        dxfs = [{'name': n, 'b64': base64.b64encode(r).decode('ascii'), 'source': src} for n, r, src in dxf_files]
         return self._json({
             'token': token,
             'claim': job.claim,
