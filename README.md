@@ -41,6 +41,11 @@ A single module that adapts at runtime to each version's Manufacturing model:
 > Enable **Work Orders** in *Manufacturing → Settings* if you want Odoo to use the
 > imported cutting time in its scheduling and costing.
 
+**Odoo Online:** custom modules cannot be installed there. Use the **LaserCAM Odoo
+Connector** for Windows instead - it works through the standard Odoo API with your own
+API key, nothing is installed in Odoo (Odoo 14+, LaserCAM Pro plan). Download:
+[LaserCAM CAD add-ins setup](https://github.com/kindiss/lasercam-cad-addins/releases/latest).
+
 ## Round-trip in short
 
 1. Open a BOM → **Action → Export to LaserCAM** → download the ZIP.
